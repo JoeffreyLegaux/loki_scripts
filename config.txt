@@ -1,0 +1,59 @@
+
+[default]
+# Specifies the behaviour of auto-expanded routines
+role = 'kernel'
+expand = true
+
+# By default, replicate source files (for kernels)
+replicate = true
+
+# By default demote local arrays
+demote_locals = true
+
+# Forces exceptions to be thrown during processing
+strict = true
+
+# Mark certain utility routines to be ignored completely. Unlike
+# "blocked" items, these will not show up in the visualisation of the
+# callgraph.
+disable = [
+    'dr_hook','initoptions','getoption','checkoptions', 'getdata',
+    'load', 'LOAD_MODD_CONVPAR_SHAL', 'LOAD_MODD_CST', 'read', 'open', 'close',
+    'exit','COUNT_ZEROES_NAN','COMPARE_VALUES_REAL','ABOR1',
+    'wrscmr', 'ini_convpar'
+]
+
+#####################################################################
+##  Define dimensions                                              ##
+#####################################################################
+
+[[dimension]]
+name = 'horizontal'
+size = 'KLON'
+index = 'JL'
+bounds = ['KIDIA', 'KFDIA']
+#aliases = ['NPROMA', 'KDIM%KLON', 'D%NIT']
+
+[[dimension]]
+name = 'vertical'
+size = 'KLEV'
+index = 'JLEV'
+
+[[dimension]]
+name = 'block_dim'
+size = 'NGPBLKS'
+index = 'IBL'
+
+
+
+[[routine]]
+name = 'main'
+role = 'driver'
+expand = false
+replicate = false
+
+[[routine]]
+name = 'cucalln_mf'
+role = 'kernel'
+expand = true
+replicate = false
