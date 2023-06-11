@@ -112,7 +112,7 @@ class InsertCrayPointers(Transformation):
     for call in FindNodes(CallStatement).visit(routine.body):
       if (call.name in targets) :
         new_call = call.clone(arguments=call.arguments)
-        new_call._update(kwarguments=new_call.kwarguments + ((stack_argument, stack_local),))
+        new_call._update(kwarguments=new_call.kwarguments + ((stack_argument.name, stack_local),))
         call_mapper[call] = new_call
 
     routine.body = Transformer(call_mapper).visit(routine.body)
@@ -155,7 +155,7 @@ class InsertCrayPointers(Transformation):
         if call.name in targets:
           if self.verbose : print ("call found : ", call)
           new_call = call.clone(arguments=call.arguments)
-          new_call._update(kwarguments=new_call.kwarguments + ((stack_argument, stack_global),))
+          new_call._update(kwarguments=new_call.kwarguments + ((stack_argument.name, stack_global),))
 
           ancestors = flatten(FindScopes(call).visit(routine.body))
           loops = [a for a in ancestors if isinstance(a, Loop)]
@@ -179,6 +179,6 @@ class InsertCrayPointers(Transformation):
 
             if loops[1].pragma :
               prgm = loops[1].pragma[0]
-              loops[1]._update(pragma=Pragma(keyword=prgm.keyword, content=prgm.content + f' private({stack_global.name})'))
+              loops[1]._update(pragma=(Pragma(keyword=prgm.keyword, content=prgm.content + f' private({stack_global.name})'),) )
 
       routine.body = Transformer(call_mapper).visit(routine.body)

@@ -17,7 +17,7 @@ from loki import (
     pragmas_attached, CaseInsensitiveDict, as_tuple, flatten,
     demote_variables
 )
-from termcolor import colored
+
 
 __all__ = ['SingleColumnCoalescedTransformationSeq']
 
@@ -182,26 +182,21 @@ def kernel_get_locals_to_demote(routine, sections, horizontal):
     candidates = _get_local_arrays(routine.body)
 
     # Create an index into all variable uses per vector-level section
-    # vars_per_section = {s: set(v.name.lower() for v in _get_local_arrays(s)) for s in sections}
+    vars_per_section = {s: set(v.name.lower() for v in _get_local_arrays(s)) for s in sections}
 
     # Count in how many sections each temporary is used
-    # counts = {}
-    # for arr in candidates:
-    #     counts[arr] = sum(1 if arr.name.lower() in v else 0 for v in vars_per_section.values())
+    counts = {}
+    for arr in candidates:
+        counts[arr] = sum(1 if arr.name.lower() in v else 0 for v in vars_per_section.values())
 
-    # # Mark temporaries that are only used in one section for demotion
-    # to_demote = [k for k, v in counts.items() if v == 1]
+    # Mark temporaries that are only used in one section for demotion
+    to_demote = [k for k, v in counts.items() if v == 1]
 
     # Filter out variables that we will pass down the call tree
     calls = FindNodes(ir.CallStatement).visit(routine.body)
     call_args = flatten(call.arguments for call in calls)
     call_args += flatten(list(dict(call.kwarguments).values()) for call in calls)
-
-    # to_demote = [v for v in to_demote if v.name not in call_args]
-    to_demote = [v for v in candidates if v.name not in call_args]
-    for v in candidates :
-        if v in call_args:
-            print(colored(f'array {v.name} not demoted in {routine} because used in call',"red"))
+    to_demote = [v for v in to_demote if v.name not in call_args]
 
     return set(to_demote)
 
@@ -342,7 +337,7 @@ def resolve_vector_dimension(routine, loop_variable, bounds):
         if ranges:
             exprmap = {r: loop_variable for r in ranges}
             loop = ir.Loop(variable=loop_variable, bounds=sym.LoopRange(bounds_v),
-                           body=SubstituteExpressions(exprmap).visit(stmt))
+                           body=(SubstituteExpressions(exprmap).visit(stmt),) )
             mapper[stmt] = loop
 
     routine.body = Transformer(mapper).visit(routine.body)
@@ -622,8 +617,8 @@ class SingleColumnCoalescedTransformationSeq(Transformation):
                 # Mark driver loop as "gang parallel".
                 if self.directive == 'openacc':
                     if loop.pragma is None:
-                        loop._update(pragma=ir.Pragma(keyword='acc', content='parallel loop gang vector_length(32)'))
-                        loop._update(pragma_post=ir.Pragma(keyword='acc', content='end parallel loop'))
+                        loop._update(pragma=(ir.Pragma(keyword='acc', content='parallel loop gang vector_length(32)'), ))
+                        loop._update(pragma_post=(ir.Pragma(keyword='acc', content='end parallel loop'), ))
                 calls_to_hoist.append(call)        
             
             # Apply hoisting of temporary "column arrays"
@@ -688,7 +683,7 @@ class SingleColumnCoalescedTransformationSeq(Transformation):
         v_start =kernel.variable_map[self.horizontal.bounds[0]]
         v_end = kernel.variable_map[self.horizontal.bounds[1]]
         bounds = sym.LoopRange((v_start, v_end))
-        vector_loop = ir.Loop(variable=v_index, bounds=bounds, body=[new_call], pragma=pragma)
+        vector_loop = ir.Loop(variable=v_index, bounds=bounds, body=[new_call], pragma=(pragma,))
         call_map[call] = vector_loop
 
         routine.body = Transformer(call_map).visit(routine.body)
