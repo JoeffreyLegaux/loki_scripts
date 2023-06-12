@@ -59,92 +59,7 @@ def kernel_remove_vector_loops(routine, horizontal):
     routine.body = Transformer(loop_map).visit(routine.body)
 
 
-def wrap_vector_section(section, routine, horizontal):
-    """
-    Wrap a section of nodes in a vector-level loop across the horizontal.
-
-    Parameters
-    ----------
-    section : tuple of :any:`Node`
-        A section of nodes to be wrapped in a vector-level loop
-    routine : :any:`Subroutine`
-        The subroutine in the vector loops should be removed.
-    horizontal: :any:`Dimension`
-        The dimension specifying the horizontal vector dimension
-    """
-
-    # Create a single loop around the horizontal from a given body
-    v_start = routine.variable_map[horizontal.bounds[0]]
-    v_end = routine.variable_map[horizontal.bounds[1]]
-    index = get_integer_variable(routine, horizontal.index)
-    bounds = sym.LoopRange((v_start, v_end))
-
-    # Ensure we clone all body nodes, to avoid recursion issues
-    vector_loop = ir.Loop(variable=index, bounds=bounds, body=Transformer().visit(section))
-
-    # Add a comment before the pragma-annotated loop to ensure
-    # we do not overlap with neighbouring pragmas
-    return (ir.Comment(''), vector_loop)
-
-
-def extract_vector_sections(section, horizontal):
-    """
-    Extract a contiguous sections of nodes that contains vector-level
-    computations and are not interrupted by recursive subroutine calls
-    or nested control-flow structures.
-
-    Parameters
-    ----------
-    section : tuple of :any:`Node`
-        A section of nodes from which to extract vector-level sub-sections
-    horizontal: :any:`Dimension`
-        The dimension specifying the horizontal vector dimension
-    """
-
-    _scope_note_types = (ir.Loop, ir.Conditional, ir.MultiConditional)
-
-    # Identify outer "scopes" (loops/conditionals) constrained by recursive routine calls
-    separator_nodes = []
-    calls = FindNodes(ir.CallStatement).visit(section)
-    for call in calls:
-        if call in section:
-            # If the call is at the current section's level, it's a separator
-            separator_nodes.append(call)
-
-        else:
-            # If the call is deeper in the IR tree, it's highest ancestor is used
-            ancestors = flatten(FindScopes(call).visit(section))
-            ancestor_scopes = [a for a in ancestors if isinstance(a, _scope_note_types)]
-            if len(ancestor_scopes) > 0 and ancestor_scopes[0] not in separator_nodes:
-                separator_nodes.append(ancestor_scopes[0])
-
-    # Extract contiguous node sections between separator nodes
-    assert all(n in section for n in separator_nodes)
-    subsections = [as_tuple(s) for s in split_at(section, lambda n: n in separator_nodes)]
-
-    # Filter sub-sections that do not use the horizontal loop index variable
-    subsections = [s for s in subsections if horizontal.index in list(FindVariables().visit(s))]
-
-    # Recurse on all separator nodes that might contain further vector sections
-    for separator in separator_nodes:
-
-        if isinstance(separator, ir.Loop):
-            subsec_body = extract_vector_sections(separator.body, horizontal)
-            if subsec_body:
-                subsections += subsec_body
-
-        if isinstance(separator, ir.Conditional):
-            subsec_body = extract_vector_sections(separator.body, horizontal)
-            if subsec_body:
-                subsections += subsec_body
-            subsec_else = extract_vector_sections(separator.else_body, horizontal)
-            if subsec_else:
-                subsections += subsec_else
-
-    return subsections
-
-
-def kernel_get_locals_to_demote(routine, sections, horizontal):
+def kernel_get_locals_to_demote(routine, horizontal):
 
     argument_names = [v.name for v in routine.arguments]
 
@@ -182,59 +97,24 @@ def kernel_get_locals_to_demote(routine, sections, horizontal):
     candidates = _get_local_arrays(routine.body)
 
     # Create an index into all variable uses per vector-level section
-    vars_per_section = {s: set(v.name.lower() for v in _get_local_arrays(s)) for s in sections}
+    # vars_per_section = {s: set(v.name.lower() for v in _get_local_arrays(s)) for s in sections}
 
     # Count in how many sections each temporary is used
-    counts = {}
-    for arr in candidates:
-        counts[arr] = sum(1 if arr.name.lower() in v else 0 for v in vars_per_section.values())
+    # counts = {}
+    # for arr in candidates:
+    #     counts[arr] = sum(1 if arr.name.lower() in v else 0 for v in vars_per_section.values())
 
     # Mark temporaries that are only used in one section for demotion
-    to_demote = [k for k, v in counts.items() if v == 1]
+    # to_demote = [k for k, v in counts.items() if v == 1]
 
     # Filter out variables that we will pass down the call tree
     calls = FindNodes(ir.CallStatement).visit(routine.body)
     call_args = flatten(call.arguments for call in calls)
     call_args += flatten(list(dict(call.kwarguments).values()) for call in calls)
-    to_demote = [v for v in to_demote if v.name not in call_args]
+    # to_demote = [v for v in to_demote if v.name not in call_args]
+    to_demote = [v for v in candidates if v.name not in call_args]
 
     return set(to_demote)
-
-
-def kernel_annotate_vector_loops_openacc(routine, horizontal, vertical):
-    """
-    Insert ``!$acc loop vector`` annotations around horizontal vector
-    loops, including the necessary private variable declarations.
-
-    Parameters
-    ----------
-    routine : :any:`Subroutine`
-        The subroutine in the vector loops should be removed.
-    horizontal: :any:`Dimension`
-        The dimension object specifying the horizontal vector dimension
-    vertical: :any:`Dimension`
-        The dimension object specifying the vertical loop dimension
-    """
-
-    # Find any local arrays that need explicitly privatization
-    argument_map = CaseInsensitiveDict({a.name: a for a in routine.arguments})
-    private_arrays = [v for v in routine.variables if not v.name in argument_map]
-    private_arrays = [v for v in private_arrays if isinstance(v, sym.Array)]
-    private_arrays = [v for v in private_arrays if not any(vertical.size in d for d in v.shape)]
-    private_arrays = [v for v in private_arrays if not any(horizontal.size in d for d in v.shape)]
-
-    with pragmas_attached(routine, ir.Loop):
-        mapper = {}
-        for loop in FindNodes(ir.Loop).visit(routine.body):
-            if loop.variable == horizontal.index:
-                # Construct pragma and wrap entire body in vector loop
-                private_arrs = ', '.join(v.name for v in private_arrays)
-                pragma = None
-                private_clause = '' if not private_arrays else f' private({private_arrs})'
-                pragma = ir.Pragma(keyword='acc', content=f'loop vector{private_clause}')
-                mapper[loop] = loop.clone(pragma=pragma)
-
-        routine.body = Transformer(mapper).visit(routine.body)
 
 
 def kernel_annotate_sequential_loops_openacc(routine, horizontal):
@@ -260,24 +140,6 @@ def kernel_annotate_sequential_loops_openacc(routine, horizontal):
                 # Perform pragma addition in place to avoid nested loop replacements
                 loop._update(pragma=ir.Pragma(keyword='acc', content='loop seq'))
 
-
-def kernel_annotate_subroutine_present_openacc(routine):
-    """
-    Insert ``!$acc data present`` annotations around the body of a subroutine.
-
-    Parameters
-    ----------
-    routine : :any:`Subroutine`
-        The subroutine to which annotations will be added
-    """
-
-    # Get the names of all array and derived type arguments
-    args = [a for a in routine.arguments if isinstance(a, sym.Array)]
-    args += [a for a in routine.arguments if isinstance(a.type.dtype, DerivedType)]
-    argnames = [str(a.name) for a in args]
-
-    routine.body.prepend(ir.Pragma(keyword='acc', content=f'data present({", ".join(argnames)})'))
-    routine.body.append(ir.Pragma(keyword='acc', content='end data'))
 
 
 def resolve_masked_stmts(routine, loop_variable):
@@ -341,30 +203,6 @@ def resolve_vector_dimension(routine, loop_variable, bounds):
             mapper[stmt] = loop
 
     routine.body = Transformer(mapper).visit(routine.body)
-
-
-def get_column_locals(routine, vertical):
-    """
-    List of array variables that include a `vertical` dimension and
-    thus need to be stored in shared memory.
-
-    Parameters
-    ----------
-    routine : :any:`Subroutine`
-        The subroutine in the vector loops should be removed.
-    vertical: :any:`Dimension`
-        The dimension object specifying the vertical dimension
-    """
-    variables = list(routine.variables)
-
-    # Filter out purely local array variables
-    argument_map = CaseInsensitiveDict({a.name: a for a in routine.arguments})
-    variables = [v for v in variables if not v.name in argument_map]
-    variables = [v for v in variables if isinstance(v, sym.Array)]
-
-    variables = [v for v in variables if any(vertical.size in d for d in v.shape)]
-
-    return variables
 
 
 class SingleColumnCoalescedTransformationSeq(Transformation):
@@ -510,67 +348,35 @@ class SingleColumnCoalescedTransformationSeq(Transformation):
         # Remove all vector loops over the specified dimension
         kernel_remove_vector_loops(routine, self.horizontal)
 
-        # Extract vector-level compute sections from the kernel
-        sections = extract_vector_sections(routine.body.body, self.horizontal)
-
-        # Extract the local variables to dome after we wrap the sections in vector loops.
-        # We do this, because need the section blocks to determine which local arrays
-        # may carry buffered values between them, so that we may not demote those!
-        to_demote = kernel_get_locals_to_demote(routine, sections, self.horizontal)
-
-        if not self.hoist_column_arrays:
-            # Promote vector loops to be the outermost loop dimension in the kernel
-            mapper = dict((s, wrap_vector_section(s, routine, self.horizontal)) for s in sections)
-            routine.body = NestedTransformer(mapper).visit(routine.body)
-
-        # Demote all private local variables that do not buffer values between sections
+        # Demote all private local variables having only horizontal dimension
         if demote_locals:
+            to_demote = kernel_get_locals_to_demote(routine, self.horizontal)
             variables = tuple(v.name for v in to_demote)
             if variables:
                 demote_variables(routine, variable_names=variables, dimensions=self.horizontal.size)
 
-        if self.hoist_column_arrays:
-            # Promote all local arrays with column dimension to arguments
-            # TODO: Should really delete and re-insert in spec, to prevent
-            # issues with shared declarations.
-            # column_locals = get_column_locals(routine, vertical=self.vertical)
-            # promoted = [v.clone(type=v.type.clone(intent='INOUT')) for v in column_locals]
-            # routine.arguments += as_tuple(promoted)
+        # Add loop index variable
+        if v_index not in routine.arguments:
+            new_v = v_index.clone(type=v_index.type.clone(intent='in'))
+            # Remove original variable first, since we need to update declaration
+            routine.variables = as_tuple(v for v in routine.variables if v != v_index)
+            routine.arguments += as_tuple(new_v)
 
-            # Add loop index variable
-            if v_index not in routine.arguments:
-                new_v = v_index.clone(type=v_index.type.clone(intent='in'))
-                # Remove original variable first, since we need to update declaration
-                routine.variables = as_tuple(v for v in routine.variables if v != v_index)
-                routine.arguments += as_tuple(new_v)
-
-            call_map = {}
-            for call in FindNodes(ir.CallStatement).visit(routine.body):
-                # Append new loop variable to call signature
-                new_call = call.clone(arguments=call.arguments)
-                new_call._update(kwarguments=new_call.kwarguments + ((self.horizontal.index, v_index),))
-                call_map[call] = new_call
-            routine.body = Transformer(call_map).visit(routine.body)
+        call_map = {}
+        for call in FindNodes(ir.CallStatement).visit(routine.body):
+            # Append new loop variable to call signature
+            new_call = call.clone(arguments=call.arguments)
+            new_call._update(kwarguments=new_call.kwarguments + ((self.horizontal.index, v_index),))
+            call_map[call] = new_call
+        routine.body = Transformer(call_map).visit(routine.body)
 
 
-        if self.directive == 'openacc':
-            # Mark all non-parallel loops as `!$acc loop seq`
-            kernel_annotate_sequential_loops_openacc(routine, self.horizontal)
+        # Mark all non-parallel loops as `!$acc loop seq`
+        kernel_annotate_sequential_loops_openacc(routine, self.horizontal)
 
-            # Mark all parallel vector loops as `!$acc loop vector`
-            kernel_annotate_vector_loops_openacc(routine, self.horizontal, self.vertical)
+        # Mark routine as `!$acc routine seq` to make it device-callable
+        routine.spec.append(ir.Pragma(keyword='acc', content='routine seq'))
 
-            # Wrap the routine body in `!$acc data present` markers
-            # to ensure device-resident data is used for array and struct arguments.
-            # kernel_annotate_subroutine_present_openacc(routine)
-
-            if self.hoist_column_arrays:
-                # Mark routine as `!$acc routine seq` to make it device-callable
-                routine.spec.append(ir.Pragma(keyword='acc', content='routine seq'))
-
-            else:
-                # Mark routine as `!$acc routine vector` to make it device-callable
-                routine.body.prepend(ir.Pragma(keyword='acc', content='routine vector'))
 
     def process_driver(self, routine, targets=None):
         """
@@ -599,9 +405,9 @@ class SingleColumnCoalescedTransformationSeq(Transformation):
 
         with pragmas_attached(routine, ir.Loop, attach_pragma_post=True):
 
-            # hoist_temporary_column_arrays applies a transformation to the routine body
+            # add_horizontal_loop_to_kernel_call applies a transformation to the routine body
             # This messes up the first loop in case of multiple driver calls
-            # Putting the calls in a list then call hoist_... after the first loop solves this
+            # Putting the calls in a list then call add_horizontal_... after the first loop solves this
             calls_to_hoist=[]
             for call in FindNodes(ir.CallStatement).visit(routine.body):
                 if not call.name in targets:
@@ -622,20 +428,15 @@ class SingleColumnCoalescedTransformationSeq(Transformation):
                 calls_to_hoist.append(call)        
             
             # Apply hoisting of temporary "column arrays"
-            if self.hoist_column_arrays:
-                for call in calls_to_hoist:
-                    self.hoist_temporary_column_arrays(routine, call)
+            for call in calls_to_hoist:
+                self.add_horizontal_loop_to_kernel_call(routine, call)
 
-    def hoist_temporary_column_arrays(self, routine, call):
+    def add_horizontal_loop_to_kernel_call(self, routine, call):
         """
-        Hoist temporary column arrays to the driver level. This
-        includes allocating them as local arrays on the host and on
-        the device via ``!$acc enter create``/ ``!$acc exit delete``
-        directives.
-
-        Note that this employs an interprocedural analysis pass
-        (forward), and thus needs to be executed for the calling
-        routine before any of the callees are processed.
+        Add an horizontal loop around kernel call at the driver level
+        with an  ``!$acc loop vector directive``. 
+        Also passes the loop variable as an additional positional
+        argument in the kernel call.
 
         Parameters
         ----------
@@ -659,13 +460,6 @@ class SingleColumnCoalescedTransformationSeq(Transformation):
         kernel = call.routine
         call_map = {}
 
-        column_locals = get_column_locals(kernel, vertical=self.vertical)
-        arg_map = dict(call.arg_iter())
-        arg_mapper = SubstituteExpressions(arg_map)
-
-        # Create a driver-level buffer variable for all promoted column arrays
-        # TODO: Note that this does not recurse into the kernels yet!
-
         # Find the iteration index variable for the specified horizontal
         v_index = get_integer_variable(routine, name=self.horizontal.index)
         if v_index.name not in routine.variable_map:
@@ -675,7 +469,7 @@ class SingleColumnCoalescedTransformationSeq(Transformation):
         new_call = call.clone(arguments=call.arguments)
         new_call._update(kwarguments=new_call.kwarguments + ((self.horizontal.index, v_index),))
 
-        # Now create a vector loop around the kerne invocation
+        # Create a vector loop around the kernel invocation
         pragma = None
         if self.directive == 'openacc':
             pragma = ir.Pragma(keyword='acc', content='loop vector')
