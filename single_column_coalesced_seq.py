@@ -15,7 +15,7 @@ from loki import (
     FindExpressions, Transformer, NestedTransformer,
     SubstituteExpressions, SymbolAttributes, BasicType, DerivedType,
     pragmas_attached, CaseInsensitiveDict, as_tuple, flatten,
-    demote_variables
+    demote_variables, SubroutineItem, CallStatement
 )
 
 
@@ -59,7 +59,7 @@ def kernel_remove_vector_loops(routine, horizontal):
     routine.body = Transformer(loop_map).visit(routine.body)
 
 
-def kernel_get_locals_to_demote(routine, horizontal):
+def kernel_get_locals_to_demote(routine, horizontal, arguments_to_demote, successors):
 
     argument_names = [v.name for v in routine.arguments]
 
@@ -94,27 +94,51 @@ def kernel_get_locals_to_demote(routine, horizontal):
         return arrays
 
     # Create a list of all local horizontal temporary arrays
-    candidates = _get_local_arrays(routine.body)
+    to_demote = _get_local_arrays(routine.spec)
 
-    # Create an index into all variable uses per vector-level section
-    # vars_per_section = {s: set(v.name.lower() for v in _get_local_arrays(s)) for s in sections}
+    # Create a list of arguments variable that are included in arguments_to_demote 
+    arg_arrays = FindVariables().visit(routine.spec)
+    arg_arrays = [a for a in arg_arrays if a.name in arguments_to_demote]
 
-    # Count in how many sections each temporary is used
-    # counts = {}
-    # for arr in candidates:
-    #     counts[arr] = sum(1 if arr.name.lower() in v else 0 for v in vars_per_section.values())
+    for array in arg_arrays :
+        to_demote.append(array)
 
-    # Mark temporaries that are only used in one section for demotion
-    # to_demote = [k for k, v in counts.items() if v == 1]
+    # Successors = scheduler items that are called from the current routine
+    successor_map={successor.routine.name: successor for successor in successors if isinstance(successor, SubroutineItem)} 
+        
+    for call in FindNodes(CallStatement).visit(routine.body) :
+        if call.name.name in successor_map :
 
-    # Filter out variables that we will pass down the call tree
-    calls = FindNodes(ir.CallStatement).visit(routine.body)
-    call_args = flatten(call.arguments for call in calls)
-    call_args += flatten(list(dict(call.kwarguments).values()) for call in calls)
-    # to_demote = [v for v in to_demote if v.name not in call_args]
-    to_demote = [v for v in candidates if v.name not in call_args]
+            # Build the list of demoted arrays that are passed to the subroutine call
+            # The list contains the name of the arguments in the subroutine
+            args_list=[]
+            arg_map = {arg[1].name : arg[0] for arg in call.arg_iter()}
+            for array in to_demote:
+                if array.name in arg_map:
+                    args_list.append(arg_map[array.name])
 
-    return set(to_demote)
+            # Check if the subroutine has not already been treated previously
+            if (successor_map[call.name.name].trafo_data != {} and args_list != []): 
+                # Check if new list is contained in existing
+                for arg in args_list :
+                    if arg.name not in successor_map[call.name.name].trafo_data :
+                        # If we encounter new non-optional arguments, we are facing multiple demotion patterns.
+                        if not arg.type.optional :
+                            raise RuntimeError(f'Argument demotion incompatible with previous call. \
+                                Routine {call.name.name}, argument {arg.name}')
+
+                        # If the new argument is optional, we assume it was not present
+                        # in the previous calls. This assumption might not be correct in
+                        # some edge cases.
+                        else :
+                            print("appended optional")
+                            successor_map[call.name.name].trafo_data.append(arg.name)
+
+            else :
+                # Otherwise, we put the demoted arguments list in the trafo_data member of the item
+                successor_map[call.name.name].trafo_data=[a.name for a in args_list]
+
+    return to_demote
 
 
 def kernel_annotate_sequential_loops_openacc(routine, horizontal):
@@ -275,6 +299,7 @@ class SingleColumnCoalescedTransformationSeq(Transformation):
         role = kwargs['role']
         item = kwargs.get('item', None)
         targets = kwargs.get('targets', None)
+        successors = kwargs.get('successors', ())
 
         if role == 'driver':
             self.process_driver(routine, targets=targets)
@@ -283,9 +308,10 @@ class SingleColumnCoalescedTransformationSeq(Transformation):
             demote_locals = self.demote_local_arrays
             if item:
                 demote_locals = item.config.get('demote_locals', self.demote_local_arrays)
-            self.process_kernel(routine, demote_locals=demote_locals)
+                print(f'item {item.name}  transfo_data : {item.trafo_data} ')
+            self.process_kernel(routine, demote_locals=demote_locals, arguments_to_demote=item.trafo_data, successors=successors)
 
-    def process_kernel(self, routine, demote_locals=True):
+    def process_kernel(self, routine, demote_locals=True, arguments_to_demote=[], successors=[]):
         """
         Applies the SCC loop layout transformation to a "kernel"
         subroutine. This will primarily strip the innermost vector
@@ -350,7 +376,7 @@ class SingleColumnCoalescedTransformationSeq(Transformation):
 
         # Demote all private local variables having only horizontal dimension
         if demote_locals:
-            to_demote = kernel_get_locals_to_demote(routine, self.horizontal)
+            to_demote = kernel_get_locals_to_demote(routine, self.horizontal, arguments_to_demote, successors)
             variables = tuple(v.name for v in to_demote)
             if variables:
                 demote_variables(routine, variable_names=variables, dimensions=self.horizontal.size)
