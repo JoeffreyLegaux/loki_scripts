@@ -1,0 +1,95 @@
+notes types :
+
+
+FIELD_BASIC : classe abstraite, définit méthode SYNC(HOST|DEVICE)(RDONLY|RDWR)
+
+FIELD_2D, FIELD_3D, ....   : EXTENDS (FIELD_BASIC), contient PTR  (pointeur REAL) et DEVPTR (pointeur REAL CONTIGUOUS)
+							 méthodes COPY, FINAL, WIPE, GET_VIEW....
+
+
+
+
+
+
+FIELD_2D%INIT => INIT_ARRAY_2D
+		TYPE (FIELD_2D_OWNER), POINTER :: YLFO
+		TYPE (FIELD_2D_WRAPPER), POINTER :: YLFW
+
+	IF (PRESENT (DATA)) THEN
+	ELSE
+  		ALLOCATE (YLFO)
+  		LBOUNDS_ = 1
+	  IF (PRESENT (LBOUNDS)) LBOUNDS_ = LBOUNDS
+	  CALL YLFO%INIT (PERSISTENT=PERSISTENT, LBOUNDS=LBOUNDS_, UBOUNDS=UBOUNDS)
+	  SELF%F_P => YLFO
+	ENDIF
+
+
+
+
+
+
+ARRAY_nD  : contient F_P de type FIELD_nD
+					 P : pointeur real avec une dimension de moins que le field
+					 	 => pointe vers une VIEW du champ F_P (= une "slice")
+
+		    prodedure INIT, FINAL, UPDATE_VIEW
+		    			=> appels aux routines spécialisées en fonction de nD
+
+
+
+notes transfo :
+
+FieldAPI : définis dans types.dat
+
+	hash_map : type dérivé => membre => son nom en tant que field_api + nb dimensions
+
+Transformation FieldAPIPtr : 
+
+	Tableau de type dérivé => on cherche si ilest dans types.dat
+							=> on remplace par le champ FIELD_nD dont on prend un des deux pointeurs (PTR ou DEV_PTR)
+
+
+
+Transformation Sync :
+
+	Recherche des tableaux nproma locaux / field_api
+
+	Simplification du control flow :
+		- On ne conserve que les blocs conditionnels et les assignements utilisant les tableaux identifiés
+		- On considère le control flow comme un arbre à plat
+			- factorisation des appels aux tableaux à synchroniser
+			- processus en 2 passes bottom to top, top to bottom
+				- à chaque noeud où un tableau doit être syncrhonisé, on insère l'appel à la méthode sync du champ FIELD_API correspondant
+
+	Différence bloc région parallèle / routine séparée
+
+		bloc local : on crée la routine sync en contains sans argument, les tableaux sont tous visibles
+
+		routine séparée : 
+			appelée depuis un bloc local
+			les tableaux nrpoma/field_api deviennent des pointeurs FIELD_BASIC ; les locaux pointent vers NULL
+
+
+
+Transformation PARALLEL
+
+	Identifier tableaux NPROMA
+	Convertir en ARRAY_nD pour avoir toutes les opérations INIT/WIPE/SYNC...
+	Appeler méthode INIT avec les bonne bornes, sans valeur pour DATA   =>  va créer un wrapper Field_nD vide
+	Appeler méthode generique COPY  => acc create / update
+
+	CALL MYROUTINE => CALL MYROUTINE_PARALLEL
+
+
+	Bloc !$acdc PARALLEL
+		=>	 
+
+
+
+
+
+
+TODO ?
+	=> passe de controle : cohérence des variables après transformation en FieldAPI
+
