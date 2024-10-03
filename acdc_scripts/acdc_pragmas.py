@@ -48,12 +48,12 @@ from parallelTransforms import MakeParallel
 from commonTransforms import RemovePragmas, RemovePragmaRegions, AddSuffixToCalls, InlineMemberCalls, RemoveComments, RemoveLoops, RemoveEmptyConditionals, AddACCRoutineDirectives
 
 
-acdc_logger = info # perf pour log filciher
+acdc_logger = info # perf pour log fichier
 
-# for file in ['../compute/cpg_dia_flu.F90', '../compute/cpcfu.F90', ]:
-# for file in ['../compute/cpcfu_simple.F90', ]:
-for file in ['../compute/cpxfu.F90', ]:
-# for file in ['../compute/cpxfu.F90','../compute/meanwind_xfu.F90', ]:
+for file in ['../compute/cpg_dia_flu.F90', '../compute/cpcfu.F90', '../compute/cpxfu.F90', '../compute/dprecips_xfu.F90', '../compute/meanwind_xfu.F90' ]:
+# for file in ['../compute/cpxfu_simple.F90', ]:
+# for file in ['../compute/cpxfu.F90' ]:
+# for file in ['../compute/cpg_dia_flu.F90', ]:
 # for file in ['../compute/dprecips_xfu.F90', ]:
 
     source = Sourcefile.from_file(file, frontend=Frontend.FP)
@@ -163,7 +163,7 @@ for file in ['../compute/cpxfu.F90', ]:
                         new_routine.apply(FieldAPIPtr(pointerType='host' if isHost else 'device'))
 
                     # Change called subroutines names, import their interface and add !$acc routine directives if relevant
-                    new_routine.apply(AddSuffixToCalls(suffix=suffix))
+                    new_routine.apply(AddSuffixToCalls(suffix=suffix, additional_variables=['YLSTACK']))
                     if not isHost:
                         new_routine.spec.append(Pragma(keyword='acc', content='routine seq'))
                         new_routine.apply(AddACCRoutineDirectives())
@@ -243,6 +243,11 @@ for file in ['../compute/cpxfu.F90', ]:
 
                 new_routine.apply(RemovePragmaRegions())
                 new_routine.apply(RemovePragmas())
+
+
+                transfodep = DependencyTransformation(suffix='_PARALLEL', 
+                                                         include_path='../loki_outputs/')
+                new_routine.apply(transfodep, role='kernel')
                 
                 print("writing to file : ", filename)
                 f.write(new_routine.to_fortran())
@@ -250,7 +255,7 @@ for file in ['../compute/cpxfu.F90', ]:
                 for subroutine in parallel_transform.outlined_routines:
                     f.write('\n')
                     f.write(subroutine.to_fortran())
-                # new_routine = None
+                new_routine = None
             f.write('\n') 
             f.close()
 

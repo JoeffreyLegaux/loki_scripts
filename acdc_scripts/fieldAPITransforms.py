@@ -16,6 +16,8 @@ import re
 
 from arpege_parameters import params
 
+def is_FieldAPI_ARRAY(typename):
+    return (re.search("^ARRAY_(|INT|LOG)\dD$", typename) != None)
 
 def get_fieldAPI_member(var, types):
     head = var[0]
@@ -36,8 +38,7 @@ def get_FieldAPI_variables(routine, fieldAPI_types):
         if (isinstance(var.type.dtype, DerivedType)):
             typename = var.type.dtype.name
             # Variables of type ARRAY_nD are automatically generated FieldAPI   
-            isArray = re.search("^ARRAY_.D$", typename)
-            if isArray :
+            if is_FieldAPI_ARRAY(typename) :
                 fieldAPI_variables[var.name] = typename
             elif typename in fieldAPI_types:
                 fieldAPI_variables[var.name] = typename
@@ -86,9 +87,8 @@ class FieldAPIPtr(Transformation):
             if base in fieldAPI_variables:
 
                 fAPI_base = fieldAPI_variables[base]
-
                 # Specific treatment for ARRAY_nD variables
-                if re.search("^ARRAY_.D$", fAPI_base):
+                if is_FieldAPI_ARRAY(fAPI_base):
                     ndim = int(fAPI_base[-2])
 
                     if var.dimensions :
@@ -100,8 +100,8 @@ class FieldAPIPtr(Transformation):
 
                     dimensions = dimensions + (block_index,)
 
-                    fAPI_var = Variable(name = "F_P", parent = Variable(name = base, scope=routine), scope=routine)
-                    variables_map[var] = Array(name=self.pointerSuffix, scope=routine, parent=fAPI_var, dimensions=dimensions)
+                    fAPI_var = Variable(name = "F_P", parent = Variable(name = base))                    
+                    variables_map[var] = Array(name=self.pointerSuffix, parent=fAPI_var, dimensions=dimensions)
 
                 else :
                     #Build the corresponding FieldAPI variable name
@@ -122,6 +122,7 @@ class FieldAPIPtr(Transformation):
                         variables_map[var] = Array(name=self.pointerSuffix, scope=routine, parent=fAPI_var, dimensions=dimensions)
 
         if self.node :
+            # print("variables map  ", variables_map)
             new_node = self.node.clone(body = SubstituteExpressions(variables_map).visit(self.node.body) )
 
             routine.body = Transformer({self.node:new_node}).visit(routine.body)

@@ -18,6 +18,13 @@ from codetiming import Timer
 from storable import retrieve
 
 
+# class RemoveImports(Transformation):
+#     def transform_subroutine(self, routine, **kwargs):
+#         imports_map = {}
+#         for imp in FindNodes(Import).visit(routine.spec):
+#             imp.c_import
+#                 pragmas_map[pragma] = None
+#         routine.spec = Transformer(pragmas_map).visit(routine.spec)
 
 class RemovePragmas(Transformation):
     def transform_subroutine(self, routine, **kwargs):
@@ -47,9 +54,11 @@ class RemovePragmaRegions(Transformation):
 
 
 class AddSuffixToCalls(Transformation):
-    def __init__(self, suffix, node = None):
+    def __init__(self, suffix, node = None, additional_variables = [], custom_visitor = None):
         self.suffix = suffix
         self.node = node
+        self.additional_variables = additional_variables
+        self.custom_visitor = custom_visitor
  
     def transform_subroutine(self, routine, **kwargs):
         containedNames = []
@@ -61,15 +70,23 @@ class AddSuffixToCalls(Transformation):
 
         body = self.node.body if self.node else routine.body
 
+        visitor = self.custom_visitor if self.custom_visitor else FindNodes
+
         calls_names = set()
         call_map ={}
-        for call in FindNodes(CallStatement).visit(body):
+        for call in visitor(CallStatement).visit(body):
             if call.name == 'DR_HOOK':
                 list_arguments = list(call.arguments)
                 list_arguments[0] = StringLiteral(list_arguments[0].value + self.suffix)
                 call_map[call] = call.clone(arguments = tuple(list_arguments) )
             elif call.name not in containedNames:
-                call_map[call] = call.clone(name=DeferredTypeSymbol(name=call.name.name + self.suffix))
+                new_args = call.arguments
+
+                for var in self.additional_variables:
+                    new_args += (Variable(name=var),)
+
+                call_map[call] = call.clone(name=DeferredTypeSymbol(name=call.name.name + self.suffix), arguments = new_args)
+
                 calls_names.add(call.name.name.lower())
 
 
@@ -212,8 +229,9 @@ class RemoveEmptyConditionals(Transformation):
         routine.body=Transformer(cond_map).visit(routine.body)
 
 class RemoveUnusedVariables(Transformation):
-    def __init__(self):
+    def __init__(self, symbols_to_remove=[]):
         self.used_symbols = ()
+        self.symbols_to_remove = symbols_to_remove
 
     def transform_subroutine(self, routine, **kwargs):
         # Find called subroutine names as they end up as deferredtype symbols in FindVariables
@@ -231,10 +249,13 @@ class RemoveUnusedVariables(Transformation):
             decl_used_symbols = ()
 
             for s in decl.symbols:
-                if s.name in body_variables:
-                    new_symbol = s.clone(type=s.type.clone(intent='inout'))
-                    self.used_symbols += (new_symbol,)
-                    decl_used_symbols += (new_symbol,)
+                if s.name in body_variables :
+                    if s.name not in self.symbols_to_remove :
+                        new_symbol = s.clone(type=s.type.clone(intent='inout'))
+                        self.used_symbols += (new_symbol,)
+                        decl_used_symbols += (new_symbol,)
+                    else :
+                        decl_used_symbols += (s,)
 
             if decl_used_symbols:
                 declarations_map[decl] = decl.clone(symbols=decl_used_symbols)

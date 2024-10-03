@@ -71,6 +71,12 @@ Transformation Sync :
 			les tableaux nrpoma/field_api deviennent des pointeurs FIELD_BASIC ; les locaux pointent vers NULL
 
 
+Transformation SCC :
+	Tableaux nproma restent en REAL(KLON)
+	Eventuellement demotion pour tableaux locaux
+	Elimination boucle JLON et opérations en array syntax
+	Ajout de la stack
+
 
 Transformation PARALLEL
 
@@ -83,11 +89,51 @@ Transformation PARALLEL
 
 
 	Bloc !$acdc PARALLEL
-		=>	 
+	Préceder appel sync_host|_device
+	
+		=> Si OpenMP + CPU :
+			Ajouter boucle sur les blocs + directive parallel do
+			 	!$OMP PARALLEL DO FIRSTPRIVATE( YDCPG_BNDS ) PRIVATE( IBL )
+  				DO IBL=1,YDCPG_OPTS%KGPBLKS
+
+  			Dans la boucle, appel à update_view (pour que chaque bloc ait bien ses boundaries)
+    				CALL YDCPG_BNDS%UPDATE_VIEW(BLOCK_INDEX=IBL)
+
+    		Corps de la boucle : transformation FieldAPI classique
+
+    	=> Si OpenACC + GPU :
+    		Ajouter boucle sur les blocs + directive parallel loop gang
+    			!$ACC PARALLEL LOOP GANG FIRSTPRIVATE( YDCPG_BNDS ) PRIVATE( IBL )
+    			DO IBL=1,YDCPG_OPTS%KGPBLKS
+    		Puis calcul des boundaries du bloc courant
+      			YDCPG_BNDS%KBL = IBL
+    			YDCPG_BNDS%KSTGLO = 1 + (IBL - 1)*YDCPG_BNDS%KLON
+    			YDCPG_BNDS%KFDIA = MIN(YDCPG_BNDS%KLON, YDCPG_BNDS%KGPCOMP - YDCPG_BNDS%KSTGLO + 1)
+				
+
+    		Seconde boucle vector sur JLON  (on veut la placer ici pour cause de perf : routine vector = 32 threads max)
+    		On crée une copie privatisée de YDGPC_BNDS nommée YLCPG_BNDS car KIDIA servira à passer la valeur de JLON
+    			YLCPG_BNDS = YDCPG_BNDS
+    			!$ACC LOOP VECTOR PRIVATE(YLCPG_BNDS)
+    			DO JLON = YDCPG_BNDS%KIDIA, YDCPG_BNDS%KFDIA  
+    				YLCPG_BNDS%KIDIA = JLON
+
+    		On crée l'appel à la routine membre qui contiendra le code en lui passant YLCPG_BNDS
+
+
+    		Création de la routine membre :
+    			On copie le contenu du bloc
+			
+
+	Gestion de la Stack
+		Dans le wrapper : CALL YLSTACK%INIT (NSTACKSIZE, NGPBLKS)
+						  CALL COPY (YLSTACK)
+						  On passe YLSTACK à la routine _PARALLEL principale  
 
 
 
-
+						   YSTACK%L = LOC(ZSTACK(1, IBL))
+      YSTACK%U = YSTACK%L + JPRB*NPROMA*10000
 
 
 TODO ?

@@ -14,6 +14,8 @@ from storable import retrieve
 
 from arpege_parameters import params
 
+from fieldAPITransforms import is_FieldAPI_ARRAY
+
 import re
 
 
@@ -197,6 +199,8 @@ class MakeSync(Transformation):
 
         elif isinstance(node, Conditional):
 
+            # print("conditional : ", node.condition.type.dtype)
+
             (if_reads, if_writes) = self.findAssigns(node.body)
             (else_reads, else_writes) = self.findAssigns(node.else_body)
 
@@ -315,6 +319,10 @@ class MakeSync(Transformation):
 
     def transform_subroutine(self, routine, **kwargs):
 
+        # We will very likely transform some variables into FIELD_BASIC
+        routine.spec.prepend(Import(module="FIELD_MODULE", symbols=(DeferredTypeSymbol(name='FIELD_BASIC'),)))
+
+
         # If there are no sections, we are treating a whole routine (GENERATE directive)
         # The main routine has turned its NPROMA local/arguments arrays into FieldAPI pointers
         # Therefore these array become pointers in the SYNC routine
@@ -354,8 +362,8 @@ class MakeSync(Transformation):
                 print("call found : ", call)
                 for arg in call.arguments:
                     if isinstance(arg,  Array):
-                        if re.search("^ARRAY_.D$", arg.type.dtype.name):
-                            args_to_fAPI[arg] = arg
+                        if is_FieldAPI_ARRAY(arg.type.dtype.name):
+                            args_to_fAPI[arg] = Variable(name = "F_P", parent = arg)
                         elif arg.type.dtype.name != 'FIELD_BASIC' :
                             print('array not FIELD_BASIC or ARRAY_nD passed to subroutine !!!!!', arg, arg.type.dtype.name )
 
@@ -370,7 +378,9 @@ class MakeSync(Transformation):
                     args_to_pointers={}
                     for arg in args_to_fAPI:
                         args_to_pointers[arg] = Variable(name=f'YLFLDPTR{count}', scope=routine)
-                        assignments.append(Assignment(lhs = args_to_pointers[arg], rhs = args_to_fAPI[arg], ptr = True))
+                        assignments.append(Assignment(  lhs = args_to_pointers[arg], 
+                                                        rhs = args_to_fAPI[arg], 
+                                                        ptr = True))
                         count = count + 1
                     self.total_FAPI_pointers = max(count, self.total_FAPI_pointers)
                     new_call = call.clone(arguments = SubstituteExpressions(args_to_pointers).visit(call.arguments))
@@ -398,6 +408,21 @@ class MakeSync(Transformation):
         for cond in FindNodes(Conditional).visit(routine.body):
             if cond.has_elseif:
                 cond._update(has_elseif = False)
+
+        # There might be FieldAPI variables in conditions, we will assume worst case
+        # and systematically evaluate to true
+        #    WARNING !!!!  Will only work for logicals
+        #                  We might need to implement full expressions replacement
+        cond_map={}
+        for cond in FindNodes(Conditional).visit(routine.body):
+            var_map = {}
+            for v in FindVariables().visit(cond.condition):
+                if v.type.dtype == DerivedType(name="FIELD_BASIC"):
+                    # print("trouvay ! ", v)
+                    var_map[v] = LogicLiteral(True)
+            if var_map:        
+                cond_map[cond] = cond.clone(condition = SubstituteExpressions(var_map).visit(cond.condition))
+        routine.body = Transformer(cond_map).visit(routine.body)
 
 
         # Initiate the data analysis process with loki built-in function
@@ -441,5 +466,12 @@ class MakeSync(Transformation):
         routine.body = Transformer(cond_map).visit(routine.body)
 
 
+
+
         # Transform the subroutine calls arguments into FIELD_BASIC pointers when relevant
         routine.body = Transformer(calls_map).visit(routine.body)
+
+
+            
+            
+        
