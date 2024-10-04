@@ -417,7 +417,8 @@ class MakeSync(Transformation):
         for cond in FindNodes(Conditional).visit(routine.body):
             var_map = {}
             for v in FindVariables().visit(cond.condition):
-                if v.type.dtype == DerivedType(name="FIELD_BASIC"):
+                if (v.type.dtype == DerivedType(name="FIELD_BASIC") or 
+                    is_FieldAPI_ARRAY(v.type.dtype.name)):
                     # print("trouvay ! ", v)
                     var_map[v] = LogicLiteral(True)
             if var_map:        
