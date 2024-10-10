@@ -388,7 +388,7 @@ class MakeParallel(Transformation):
 
         local_stack = Variable(name="YLSTACK", type=SymbolAttributes(DerivedType(name="STACK"), scope = routine))
 
-        routine.variables += (local_boundary_variable, local_stack,)
+        # routine.variables += (local_boundary_variable, local_stack,)
                
 
 
@@ -523,6 +523,7 @@ class MakeParallel(Transformation):
                 # Default behaviour : apply FieldAPI transformation to the loop body
                 routine.apply(FieldAPIPtr(pointerType=target.lower(), node=blocks_loop ))
 
+        routine.variables += (local_boundary_variable, local_stack,)   
 
         routine.body = Transformer(regions_map).visit(routine.body)
         addFieldAPIPointers(routine, total_FAPI_pointers)
