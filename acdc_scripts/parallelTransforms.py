@@ -15,7 +15,8 @@ from storable import retrieve
 from syncTransforms import MakeSync, addFieldAPIPointers
 
 from fieldAPITransforms import FieldAPIPtr
-from commonTransforms import InlineMemberCalls, RemoveComments, RemovePragmas, RemovePragmaRegions, RemoveEmptyConditionals, AddSuffixToCalls, RemoveLoops, RemoveUnusedVariables, AddACCRoutineDirectives
+from commonTransforms import InlineMemberCalls, RemoveComments, RemovePragmas, RemovePragmaRegions, RemoveEmptyConditionals, \
+                                AddSuffixToCalls, RemoveLoops, RemoveUnusedVariables, AddACCRoutineDirectives, RemoveUnusedImports
 
 from arpege_parameters import params
 
@@ -304,47 +305,49 @@ class MakeParallel(Transformation):
         loop_new_statements += (Assignment( lhs = Variable(name='KFDIA', parent = boundary_variable), 
                                             rhs = parse_fparser_expression(rhs_string, scope=routine)
                                           )
-                                        ,)
+                                 ,)
 
         return (loop_pragma, loop_new_statements)
 
     def addJLONDefinition(self, routine):
-        jlon_found = False
-        # if "JLON" not in [v.name for v in FindVariables().visit(routine.spec)]:
+        # jlon_found = False
         if "JLON" not in [v.name for v in routine.variables]:
-            routine.variables += (Variable(name='JLON', type=SymbolAttributes(BasicType.INTEGER,  kind=Variable(name='JPIM'))),)
+            routine.variables += (Variable( name='JLON', 
+                                            type=SymbolAttributes(BasicType.INTEGER,  kind=Variable(name='JPIM')))
+                                ,)
 
 
     def makeOpenACCColumnsLoop(self, call_parallel, boundary_variable, local_boundary_variable, routine):
         # Inner loop on JLON
 
+        # YLCPG_BNDS = YDCPG_BNDS
+        assignments = (Assignment(lhs = local_boundary_variable, rhs = boundary_variable), ) 
+
         # YLCPG_BNDS%KIDIA = JLON
-        assignments = (Assignment(  lhs = Variable(name='KIDIA', parent = local_boundary_variable), 
+        assignments += (Assignment( lhs = Variable(name='KIDIA', parent = local_boundary_variable), 
                                     rhs = Variable(name='JLON') ), )
         # YLCPG_BNDS%KFDIA = JLON
-        assignments += (Assignment(  lhs = Variable(name='KFDIA', parent = local_boundary_variable), 
+        assignments += (Assignment( lhs = Variable(name='KFDIA', parent = local_boundary_variable), 
                                     rhs = Variable(name='JLON') ), )
         # Compute local stack variables boundaries
-        assignments += (Assignment (lhs = Variable(name='YLSTACK'), rhs = Variable(name='YDSTACK')), )
+        assignments += (Assignment( lhs = Variable(name='YLSTACK'), rhs = Variable(name='YDSTACK')), )
 
         # YLSTACK%L = LOC (YDSTACK%F_P%DEVPTR (1,YDCPG_BNDS%KBL))
         L_string = 'LOC (YDSTACK%F_P%DEVPTR (1,IBL))'
-        assignments += (Assignment(   lhs = Variable(name='L', parent = Variable(name='YLSTACK')),
-                                        rhs = parse_fparser_expression(L_string, scope=routine)
-                                  ), )
+        assignments += (Assignment( lhs = Variable(name='L', parent = Variable(name='YLSTACK')),
+                                    rhs = parse_fparser_expression(L_string, scope=routine)),)
         # YLSTACK%U = YLSTACK%L + KIND (YDSTACK%F_P%DEVPTR) * SIZE (YDSTACK%F_P%DEVPTR (:,YDCPG_BNDS%KBL))
         U_string = 'YLSTACK%L + KIND (YDSTACK%F_P%DEVPTR) * SIZE (YDSTACK%F_P%DEVPTR (:,YDCPG_BNDS%KBL))'
-        assignments += (Assignment(   lhs = Variable(name='U', parent = Variable(name='YLSTACK')),
-                                        rhs = parse_fparser_expression(U_string, scope=routine)
-                                    ), )                                                   
+        assignments += (Assignment( lhs = Variable(name='U', parent = Variable(name='YLSTACK')),
+                                    rhs = parse_fparser_expression(U_string, scope=routine)  ),)                                                   
 
-        columns_loop = Loop(   variable = Variable(name='JLON'), 
+        columns_loop = Loop(    variable = Variable(name='JLON'), 
                                 bounds = LoopRange( (Variable(name='KIDIA', parent = boundary_variable),
                                                     Variable(name='KFDIA', parent = boundary_variable))),
                                 body = (assignments, call_parallel,),
                                 pragma = (Pragma(keyword="ACC", content = f'LOOP VECTOR PRIVATE({local_boundary_variable},  YLSTACK)'),)
 
-                        )
+                            )
 
 
         if not self.has_column_loops:
@@ -388,10 +391,6 @@ class MakeParallel(Transformation):
 
         local_stack = Variable(name="YLSTACK", type=SymbolAttributes(DerivedType(name="STACK"), scope = routine))
 
-        # routine.variables += (local_boundary_variable, local_stack,)
-               
-
-
         for region in FindNodes(PragmaRegion).visit(routine.body):
             print("region : ", region.pragma)
             region_num = region_num + 1
@@ -432,6 +431,8 @@ class MakeParallel(Transformation):
 
             sync_routine.apply(RemoveLoops())
             sync_routine.apply(AddSuffixToCalls(suffix='_SYNC_' + target))
+            sync_routine.apply(RemoveUnusedImports())
+
             syncTransformation = MakeSync(pointerType=target.lower(), sections = (sync_routine.body,), nproma_arrays=nproma_arrays )
             sync_routine.apply(syncTransformation)
             # We keep the maximum amount of local pointers needed to pass FieldAPI variables to Sync subroutines
@@ -446,7 +447,10 @@ class MakeParallel(Transformation):
             # Therefore we do not need any variable passing or declaration as we manipulate only variables of the caller
             if not routine.contains:
                 routine.contains = Section(Intrinsic(text="CONTAINS"))
-            routine.contains.append(sync_routine.clone(body=sync_routine.body, args=None, spec=None, contains=None))
+
+            includes = Section(tuple([n for n in FindNodes(Import).visit(sync_routine.spec) if n.c_import]))
+            
+            routine.contains.append(sync_routine.clone(body=sync_routine.body, args=None, spec=includes, contains=None))
 
 
             call_sync = CallStatement(name = DeferredTypeSymbol(name=sync_name), arguments=(), scope=None )
@@ -460,16 +464,25 @@ class MakeParallel(Transformation):
                 (loop_pragma, loop_new_statements) = self.makeOpenACCLoop(routine, boundary_variable)
 
 
-            new_region = AddSuffixToCalls(  suffix=('_SINGLE_COLUMN' if scc else '') + '_FIELD_API_' + target, 
+
+            if not outline:
+                region = AddSuffixToCalls(  suffix=('_SINGLE_COLUMN' if scc else '') + '_FIELD_API_' + target, 
                                             node=region, 
                                             additional_variables=['YLSTACK'] if scc else []).transform_subroutine(routine = routine)
 
             if outline:
 
                 new_subroutine = routine.clone( name = routine.name + "_PARALLEL_" + str(region_num), 
-                                                body = new_region.body,
+                                                body = region.body,
                                                 spec = routine.spec.clone(),
                                                 contains = None)
+
+                new_subroutine.apply(AddSuffixToCalls(  suffix=('_SINGLE_COLUMN' if scc else '') + '_FIELD_API_' + target, 
+                                            # node=region, 
+                                            additional_variables=['YLSTACK'] if scc else []))
+
+                new_subroutine.apply(RemoveUnusedImports())
+
                 if scc:
                     true_symbols, false_symbols=logical_lst.symbols()
                     false_symbols.append('LHOOK')
@@ -505,7 +518,7 @@ class MakeParallel(Transformation):
                     columns_loop = self.makeOpenACCColumnsLoop(call_parallel, boundary_variable, local_boundary_variable, routine)
                 
             if not outline:
-                loop_body = new_region.body
+                loop_body = region.body
             else:
                 if directive == 'openacc':
                     loop_body = columns_loop
@@ -517,11 +530,15 @@ class MakeParallel(Transformation):
                                 body = (loop_new_statements, loop_body,), 
                                 pragma = (loop_pragma,)   
                                 )
-            routine.body = Transformer({new_region:(call_sync,blocks_loop,)}).visit(routine.body)
+            routine.body = Transformer({region:(call_sync,blocks_loop,)}).visit(routine.body)
 
             if not outline:
                 # Default behaviour : apply FieldAPI transformation to the loop body
                 routine.apply(FieldAPIPtr(pointerType=target.lower(), node=blocks_loop ))
+
+
+        # We remove remaining imports only after having treated all Parallel blocks 
+        routine.apply(RemoveUnusedImports())
 
         routine.variables += (local_boundary_variable, local_stack,)   
 

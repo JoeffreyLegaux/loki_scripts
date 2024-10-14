@@ -85,32 +85,22 @@ class AddSuffixToCalls(Transformation):
                 for var in self.additional_variables:
                     new_args += (Variable(name=var),)
 
-                call_map[call] = call.clone(name=DeferredTypeSymbol(name=call.name.name + self.suffix), arguments = new_args)
+                new_call_name = call.name.name + self.suffix
+                call_map[call] = call.clone(name=DeferredTypeSymbol(name=new_call_name), arguments = new_args)
+                calls_names.add(new_call_name.lower())
 
-                calls_names.add(call.name.name.lower())
 
-
-        # update includes
+        # Update includes : check if they are not already imported
         treated_calls = []
-        imports_map = {}
         for imp in FindNodes(Import).visit(routine.spec):
             if imp.c_import:
-                # print("module : ", imp.module[:-8])
                 for call in calls_names :
                     if imp.module[:-8] == call:
-                        imports_map[imp] = imp.clone(module=imp.module[:-8] + self.suffix.lower() + '.intfb.h')
                         treated_calls.append(call)
-                    # Edge case : if import already changed in previous parallel region treatment
-                    if imp.module[:-8] == call + self.suffix.lower():
-                        treated_calls.append(call)
-
 
         for call in calls_names:
             if call not in treated_calls:
-                routine.spec.append(Import(module=call + self.suffix.lower() + '.intfb.h', c_import = True))
-
-
-        routine.spec = Transformer(imports_map).visit(routine.spec)
+                routine.spec.append(Import(module=call + '.intfb.h', c_import = True))
 
 
         if self.node:
@@ -123,6 +113,23 @@ class AddSuffixToCalls(Transformation):
             routine.body = Transformer(call_map).visit(routine.body)
             return None
             
+class RemoveUnusedImports(Transformation):
+    # Remove imports for subroutine that are not called 
+    # generally needed after AddSuffixToCalls transformation
+    def transform_subroutine(self, routine, **kwargs):
+        calls_names = set()
+        for call in FindNodes(CallStatement).visit(routine.body):
+            calls_names.add(call.name.name.lower())
+    
+        imports_map={}
+        for imp in FindNodes(Import).visit(routine.spec):
+            if imp.c_import:
+                if imp.module[:-8] not in calls_names:
+                    print("import keksixte plus ! ", imp)
+                    imports_map[imp] = None
+    
+        routine.spec = Transformer(imports_map).visit(routine.spec)
+
 class AddACCRoutineDirectives(Transformation):
     def __init__(self, nodes_list = None):
         self.nodes_list = nodes_list
