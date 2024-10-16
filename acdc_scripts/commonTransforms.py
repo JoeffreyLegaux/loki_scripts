@@ -125,7 +125,6 @@ class RemoveUnusedImports(Transformation):
         for imp in FindNodes(Import).visit(routine.spec):
             if imp.c_import:
                 if imp.module[:-8] not in calls_names:
-                    print("import keksixte plus ! ", imp)
                     imports_map[imp] = None
     
         routine.spec = Transformer(imports_map).visit(routine.spec)
