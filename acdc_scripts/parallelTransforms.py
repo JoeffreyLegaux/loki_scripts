@@ -77,7 +77,7 @@ class MakeParallel(Transformation):
         upper_bounds=[]
         for dim in var.dimensions:
             if isinstance(dim, RangeIndex):
-                lower_bounds.append(dim.lower if dim.lower else 1)
+                lower_bounds.append(dim.lower)
                 upper_bounds.append(dim.upper)
             else:
                 lower_bounds.append(1)
