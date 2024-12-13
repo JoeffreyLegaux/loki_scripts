@@ -1,13 +1,10 @@
 from loki import (Frontend, Sourcefile, FindNodes, Loop, Node, Intrinsic, Subroutine, Transformer, 
     PragmaRegion )
 
-from loki.ir import Section, Comment, VariableDeclaration, Pragma
+from loki.ir import Section, Comment, VariableDeclaration, Pragma, FindVariables, SubstituteExpressions
 from loki.ir.pragma_utils import PragmaRegionAttacher
 from loki.transformations.build_system import DependencyTransformation
-from loki.transformations import resolve_associates
-
-from loki.expression import FindVariables
-from loki.expression.expr_visitors import SubstituteExpressions
+from loki.transformations.sanitise import do_resolve_associates
 
 from loki.frontend.fparser import *
 
@@ -69,7 +66,6 @@ for file in ['../compute/cpg_dia_flu.F90', '../compute/cpcfu.F90', '../compute/c
         # Search spec for GENERATE pragmas
         for pragma in FindNodes(Pragma).visit(routine.spec):
             if (pragma.keyword == 'ACDC'):
-                # print("pragma in spec : ", pragma)
                 if ('GENERATE' in pragma.content ):
                     splitted = pragma.content.split('TARGET')
 
@@ -80,8 +76,6 @@ for file in ['../compute/cpg_dia_flu.F90', '../compute/cpcfu.F90', '../compute/c
                         if s not in to_generate:
                             to_generate.append(s)
                 pragmas_map[pragma] = None
-
-        # routine.spec = Transformer(pragmas_map).visit(routine.spec)
 
         print("transformations to generate : ", to_generate)
 
@@ -204,7 +198,7 @@ for file in ['../compute/cpg_dia_flu.F90', '../compute/cpcfu.F90', '../compute/c
                 print("after add suffix")
 
                 # Resolve associates because variables might be associated to a Field API member and we need to identify them
-                resolve_associates(new_routine)
+                do_resolve_associates(new_routine)
                 # Main transformation : analyse dataflow and insert relevant sync calls
                 new_routine.apply(MakeSync(pointerType='host' if isHost else 'device'))
 
@@ -236,7 +230,7 @@ for file in ['../compute/cpg_dia_flu.F90', '../compute/cpcfu.F90', '../compute/c
                 new_routine.apply(RemoveComments())
                 new_routine.apply(InlineMemberCalls())
                 print("after inline")
-                resolve_associates(new_routine)
+                do_resolve_associates(new_routine)
 
                 parallel_transform = MakeParallel() 
                 new_routine.apply(parallel_transform)

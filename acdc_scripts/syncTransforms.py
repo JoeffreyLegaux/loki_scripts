@@ -1,10 +1,8 @@
 from loki import (Frontend, Sourcefile, FindNodes, Loop, Node, Intrinsic, Subroutine, Transformer, NestedTransformer, 
-    PragmaRegion, DerivedType, Transformation, CallStatement, SymbolAttributes, BasicType  )
+    PragmaRegion, DerivedType, Transformation, CallStatement, SymbolAttributes, BasicType, FindTypedSymbols, FindVariables, SubstituteExpressions  )
 
 from loki.ir import Section, Comment, CommentBlock, VariableDeclaration, Pragma, Import, Assignment, Conditional, LeafNode, InternalNode, Associate
 
-from loki.expression import FindTypedSymbols, FindVariables
-from loki.expression.expr_visitors import SubstituteExpressions
 from loki.expression.symbols import DeferredTypeSymbol, TypedSymbol, VariableSymbol, Array, Scalar, RangeIndex, Variable, StringLiteral, InlineCall, LogicLiteral, LiteralList
 from loki.frontend.fparser import *
 from loki.logging import info, error
