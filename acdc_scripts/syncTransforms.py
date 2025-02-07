@@ -339,7 +339,7 @@ class MakeSync(Transformation):
 
 
         # Create the dict of FieldAPI variables used in this routine
-        self.fieldAPI_types = retrieve('../scripts/types.dat')
+        self.fieldAPI_types = retrieve('../../types.dat')
         self.fieldAPI_variables = get_FieldAPI_variables(routine, self.fieldAPI_types)
 
         
@@ -359,11 +359,14 @@ class MakeSync(Transformation):
                 args_to_fAPI = {}
                 print("call found : ", call)
                 for arg in call.arguments:
-                    if isinstance(arg,  Array):
+                    if isinstance(arg, Scalar):
+                        if is_FieldAPI_ARRAY(arg.type.dtype.name):
+                            args_to_fAPI[arg] = Variable(name = "F_P", parent = arg)
+                    elif isinstance(arg,  Array):
                         if is_FieldAPI_ARRAY(arg.type.dtype.name):
                             args_to_fAPI[arg] = Variable(name = "F_P", parent = arg)
                         elif arg.type.dtype.name != 'FIELD_BASIC' :
-                            print('array not FIELD_BASIC or ARRAY_nD passed to subroutine !!!!!', arg, arg.type.dtype.name )
+                            print('array not FIELD_BASIC or FIELD_nxx_ARRAY passed to subroutine !!!!!', arg, arg.type.dtype.name )
 
                     elif isinstance(arg, DeferredTypeSymbol):
                         fAPI_member = self.get_fieldAPI_member(arg, self.fieldAPI_types )

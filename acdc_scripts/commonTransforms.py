@@ -24,6 +24,16 @@ from storable import retrieve
 #                 pragmas_map[pragma] = None
 #         routine.spec = Transformer(pragmas_map).visit(routine.spec)
 
+#class AddImports(Transformation):
+#    def __init__(self, modules_names = []):
+#        self.modules_names = modules_names
+#    
+#    def transform_subroutine(self, routine, **kwargs):
+#        existing_modules = []
+#        for imp in FindNodes(Import).visit(routine.spec):
+
+
+
 class RemovePragmas(Transformation):
     def transform_subroutine(self, routine, **kwargs):
         pragmas_map = {}
@@ -44,21 +54,44 @@ class RemovePragmaRegions(Transformation):
         for region in FindNodes(PragmaRegion).visit(routine.body):
             pragmas_map[region] = region.body
         routine.body = Transformer(pragmas_map).visit(routine.body)
-        # pragmas_map = {}
-        # for region in FindNodes(PragmaRegion).visit(routine.spec):
-        #     pragmas_map[region] = region.spec
-        # routine.spec = Transformer(pragmas_map).visit(routine.spec)
+        pragmas_map = {}
+        for region in FindNodes(PragmaRegion).visit(routine.spec):
+            pragmas_map[region] = region.spec
+        routine.spec = Transformer(pragmas_map).visit(routine.spec)
+
+class ReplaceAbortRegions(Transformation):
+    def __init__(self, abort_call = True):
+        self.abort_call = abort_call 
+    def transform_subroutine(self, routine, **kwargs):
+        regions_map = {}
+        for region in FindNodes(PragmaRegion).visit(routine.body):
+            if ('ABORT' in region.pragma.content):
+                regions_map[region] = None if not self.abort_call else \
+                                            (CallStatement(name = DeferredTypeSymbol(name='ABOR1'), 
+                                                        arguments=(StringLiteral('ERROR : WRONG SETTINGS')), 
+                                                        scope=routine), 
+                                           )
 
 
+        routine.body = Transformer(regions_map).visit(routine.body)
+
+
+class RemoveAssignments(Transformation):
+    def transform_subroutine(self, routine, **kwargs):
+        assigns_map = {}
+        for assign in FindNodes(Assignment).visit(routine.body):
+            assigns_map[assign] = None
+        routine.body = Transformer(assigns_map).visit(routine.body)
+ 
 
 class AddSuffixToCalls(Transformation):
-    def __init__(self, suffix, node = None, additional_variables = [], custom_visitor = None):
+    def __init__(self, suffix, additional_variables = [], custom_visitor = None):
         self.suffix = suffix
-        self.node = node
         self.additional_variables = additional_variables
         self.custom_visitor = custom_visitor
+        self.routines_called = set()
  
-    def transform_subroutine(self, routine, **kwargs):
+    def transform_node(self, node, routine, inplace = False):
         containedNames = []
 
         if routine.contains :
@@ -66,27 +99,27 @@ class AddSuffixToCalls(Transformation):
                 if isinstance(n, Subroutine):
                     containedNames.append(n.name)
 
-        body = self.node.body if self.node else routine.body
-
         visitor = self.custom_visitor if self.custom_visitor else FindNodes
 
         calls_names = set()
-        call_map ={}
-        for call in visitor(CallStatement).visit(body):
-            if call.name == 'DR_HOOK':
-                list_arguments = list(call.arguments)
-                list_arguments[0] = StringLiteral(list_arguments[0].value + self.suffix)
-                call_map[call] = call.clone(arguments = tuple(list_arguments) )
-            elif call.name not in containedNames:
-                new_args = call.arguments
+        call_map = {}
+        for call in visitor(CallStatement).visit(node.body):
+            if call.name != 'ABOR1':
+                if call.name == 'DR_HOOK':
+                    list_arguments = list(call.arguments)
+                    list_arguments[0] = StringLiteral(list_arguments[0].value + self.suffix)
+                    call_map[call] = call.clone(arguments = tuple(list_arguments) )
+                elif call.name not in containedNames:
+                    print("call foudn ", call.name)
+                    new_args = call.arguments
 
-                for var in self.additional_variables:
-                    new_args += (Variable(name=var),)
+                    for var in self.additional_variables:
+                        new_args += (Variable(name=var),)
 
-                new_call_name = call.name.name + self.suffix
-                call_map[call] = call.clone(name=DeferredTypeSymbol(name=new_call_name), arguments = new_args)
-                calls_names.add(new_call_name.lower())
-
+                    new_call_name = call.name.name + self.suffix
+                    self.routines_called.add(call.name.name) 
+                    call_map[call] = call.clone(name=DeferredTypeSymbol(name=new_call_name), arguments = new_args)
+                    calls_names.add(new_call_name.lower())
 
         # Update includes : check if they are not already imported
         treated_calls = []
@@ -101,15 +134,16 @@ class AddSuffixToCalls(Transformation):
                 routine.spec.append(Import(module=call + '.intfb.h', c_import = True))
 
 
-        if self.node:
-            new_node = self.node.clone(body = Transformer(call_map).visit(self.node.body) )
-
-            new_node2 = new_node.clone()
-            routine.body = Transformer({self.node:new_node}).visit(routine.body)
-            return new_node2
-        else:
-            routine.body = Transformer(call_map).visit(routine.body)
+        if inplace:
+            node.body = Transformer(call_map).visit(node.body)
             return None
+        else:
+            new_node = node.clone(body = Transformer(call_map).visit(node.body) )
+            return new_node
+
+
+    def transform_subroutine(self, routine, **kwargs):
+        self.transform_node(routine, routine, inplace=True)
             
 class RemoveUnusedImports(Transformation):
     # Remove imports for subroutine that are not called 

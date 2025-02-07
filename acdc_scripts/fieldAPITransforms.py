@@ -16,7 +16,7 @@ import re
 from arpege_parameters import params
 
 def is_FieldAPI_ARRAY(typename):
-    return (re.search("^ARRAY_(|INT|LOG)\dD$", typename) != None)
+    return (re.search("^FIELD_\d(IM|LM|RD|RM|RB)_ARRAY$", typename) != None)
 
 def get_fieldAPI_member(var, types):
     head = var[0]
@@ -59,27 +59,20 @@ class FieldAPIPtr(Transformation):
         self.node = node
         
 
-    def transform_subroutine(self, routine, **kwargs):
-
-        fieldAPI_types = retrieve('../scripts/types.dat')
+    def transform_node(self, node, routine, inplace = False):
+        print("transform node yay")
+        fieldAPI_types = retrieve('../../types.dat')
 
         fieldAPI_variables = get_FieldAPI_variables(routine, fieldAPI_types)
 
         variables_map = {}
 
-        boundary_variable = None
-
-        for var in routine.variables :
-            if (isinstance(var.type.dtype, DerivedType)):
-                if (var.type.dtype.name == params.boundaries_type):
-                    boundary_variable = var
-
-        block_index = Variable(name='KBL', parent=boundary_variable, scope=routine)
+        block_index = Variable(name=params.block_counter, scope=routine)
 
 
-        body = self.node.body if self.node else routine.body
+        # body = self.node.body if self.node else routine.body
 
-        for var in FindVariables().visit(body) :
+        for var in FindVariables().visit(node.body) :
             
             base = var.name_parts[0]
 
@@ -88,7 +81,7 @@ class FieldAPIPtr(Transformation):
                 fAPI_base = fieldAPI_variables[base]
                 # Specific treatment for ARRAY_nD variables
                 if is_FieldAPI_ARRAY(fAPI_base):
-                    ndim = int(fAPI_base[-2])
+                    ndim = int(fAPI_base[6])
 
                     if hasattr(var, "dimensions") and var.dimensions :
                         dimensions = var.dimensions
@@ -120,12 +113,14 @@ class FieldAPIPtr(Transformation):
                         fAPI_var = Variable(name = fAPI_member[0], parent=var.parent, scope=routine)
                         variables_map[var] = Array(name=self.pointerSuffix, scope=routine, parent=fAPI_var, dimensions=dimensions)
 
-        if self.node :
+        if inplace:
+            node.body = SubstituteExpressions(variables_map).visit(node.body)
+            return None
+        else:
             # print("variables map  ", variables_map)
             new_node = self.node.clone(body = SubstituteExpressions(variables_map).visit(self.node.body) )
-
-            routine.body = Transformer({self.node:new_node}).visit(routine.body)
-        else:
-            routine.body = SubstituteExpressions(variables_map).visit(routine.body)
+            return new_node            
 
 
+    def transform_subroutine(self, routine, **kwargs):
+        self.transform_node(routine, routine, inplace=True)

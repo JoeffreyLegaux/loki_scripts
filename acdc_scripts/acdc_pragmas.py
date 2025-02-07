@@ -8,15 +8,15 @@ from loki.transformations.sanitise import do_resolve_associates
 
 from loki.frontend.fparser import *
 
-from fieldAPITransforms import FieldAPIPtr
-
-from arpege_parameters import params
 
 from termcolor import colored
 from codetiming import Timer
 from loki.logging import perf, info
 import sys, traceback
 
+#===================================================================================================
+# Importing SCC transforms from Erwan 
+#===================================================================================================
 sys.path.append('/home/legaux/meteo/models/build_scc_erwan/transformation/')
 
 try :
@@ -30,83 +30,116 @@ else:
     print (colored("build_scc : scc_transform_routine imported", "green"))
 
 try :
-    import logical_lst
+   import logical_lst
 except ImportError as error:
-    print (colored("build_scc : logical_lst not imported, check sys.path !", "red"))
-    print("Error message : ", error)
-    traceback.print_exc()
-    exit(1)
+   print (colored("build_scc : logical_lst not imported, check sys.path !", "red"))
+   print("Error message : ", error)
+   traceback.print_exc()
+   exit(1)
 else:
-    print (colored("build_scc : logical_lst imported", "green"))
+   print (colored("build_scc : logical_lst imported", "green"))
+#===================================================================================================
 
 
+#Importing local transformation classes
+from fieldAPITransforms import FieldAPIPtr
+from arpege_parameters import params
 from syncTransforms import MakeSync
 from parallelTransforms import MakeParallel
-from commonTransforms import RemovePragmas, RemovePragmaRegions, AddSuffixToCalls, InlineMemberCalls, RemoveComments, RemoveLoops, RemoveEmptyConditionals, AddACCRoutineDirectives
+from commonTransforms import (RemovePragmas, RemovePragmaRegions, RemoveAssignments, ReplaceAbortRegions, 
+    AddSuffixToCalls, InlineMemberCalls, RemoveComments, RemoveLoops, RemoveEmptyConditionals, AddACCRoutineDirectives )
+
+
+
+
+def add_to_transforms(routine, transformations):
+    if routine in treated_routines:
+        transformations = {trans for trans in transformation if trans not in treated_routines[routine]}
+
+    if routine not in routines_to_transform:
+        routines_to_transform[routine] = transformations
+    else:
+        routines_to_transform[routine].union(transformations)
+
+def add_to_treated(routine, transformations):
+    if routine not in treated_routines:
+        treated_routines[routine] = transformations
+    else:
+        treated_routines[routine].union(transformations)
+
+    
+
+def attach_acdc_regions(routine):
+    pairs = []
+    for pragma in FindNodes(Pragma).visit(routine.body):
+        #print("pragma found : ", pragma)
+        if (pragma.keyword == 'ACDC'):
+            if ('{' in pragma.content):
+                start = pragma
+            elif ('}' in pragma.content):
+                if (not start):
+                    print("ACDC } without previous {")
+                else:
+                    print("ACDC pragma region identified")
+                    # extract_pragma_region(routine.body, start=start, end=pragma)
+                    pairs.append((start,pragma))
+                    start = None
+        else:
+            print('Unknown pragma found : {pragma}')
+
+    PragmaRegionAttacher(pragma_pairs=pairs, inplace=True).visit(routine.body)
 
 
 acdc_logger = info # perf pour log fichier
 
-for file in ['../compute/cpg_dia_flu.F90', '../compute/cpcfu.F90', '../compute/cpxfu.F90', '../compute/dprecips_xfu.F90', '../compute/meanwind_xfu.F90' ]:
-# for file in ['../compute/cpxfu_simple.F90', ]:
-# for file in ['../compute/cpxfu.F90' ]:
-# for file in ['../compute/cpg_dia_flu.F90', ]:
-# for file in ['../compute/dprecips_xfu.F90', ]:
+#source_path = '../../loki_WIP/src/local/'
+source_path = '../../local/'
 
-    source = Sourcefile.from_file(file, frontend=Frontend.FP)
+
+output_path = source_path
+output_path_scc = source_path
+# Start at CPG_DYN_SLG with empty list of forced transformations
+# routines_to_transform = {'CPG_DYN_SLG':{'PARALLEL'},}
+
+routines_to_transform = {'SIGAM_GP':{'ABORT'},}
+treated_routines = {}
+
+while (len(routines_to_transform) > 0):
+    routine =  next(iter(routines_to_transform))
+    print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+    print("treating ", routine)
+    print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+    transformations_to_generate = routines_to_transform[routine]
+
+    # Remove routine from the list. If new transformations arise, treat them in the next pass
+    routines_to_transform.pop(routine)
+    print("tranforms to generate : ", transformations_to_generate) 
+    
+    if routine not in params.routines_to_files:
+        print(f'ERROR : routine {routine} not found in files list !!!')
+        exit(0)
+    else:
+        file = params.routines_to_files[routine]
+    
+    print("file : ", file)
+
+    source = Sourcefile.from_file(source_path+file, frontend=Frontend.FP)
 
     routines = source.subroutines
 
     for routine in routines:
-        to_generate = []
-        start = None
+        # start = None
 
-        pragmas_map = {}
+        # pragmas_map = {}
 
-        # Search spec for GENERATE pragmas
-        for pragma in FindNodes(Pragma).visit(routine.spec):
-            if (pragma.keyword == 'ACDC'):
-                if ('GENERATE' in pragma.content ):
-                    splitted = pragma.content.split('TARGET')
+        attach_acdc_regions(routine)
+    
 
-                    # Get value after TARGET keyword and strip '=' character
-                    splitted = splitted[-1].split('=')[-1]
-                    splitted = splitted.split('/')
-                    for s in splitted:
-                        if s not in to_generate:
-                            to_generate.append(s)
-                pragmas_map[pragma] = None
-
-        print("transformations to generate : ", to_generate)
-
-        if 'Parallel' in to_generate:
-        #search and bind pragmas for parallel regions
-
-            pairs = []
-            for pragma in FindNodes(Pragma).visit(routine.body):
-                print("pragma found : ", pragma)
-                if (pragma.keyword == 'ACDC'):
-                    
-                    if ('{' in pragma.content):
-                        start = pragma
-                    elif ('}' in pragma.content):
-                        if (not start):
-                            print("ACDC } without previous {")
-                        else:
-                            print("ACDC pragma region identified")
-                            # extract_pragma_region(routine.body, start=start, end=pragma)
-                            pairs.append((start,pragma))
-                            start = None
-
-                else:
-                    print('Unknown pragma found : {pragma}')
-
-            PragmaRegionAttacher(pragma_pairs=pairs, inplace=True).visit(routine.body)
-
-    for transform in to_generate:
+    for transform in transformations_to_generate:
+        # COmpletely useless now ????
         if (transform == 'FieldAPIHost'):
             filename = '../loki_outputs/' + file[10:-4] + '_field_api_host.F90'
-            f = open(filename, 'w')
+            ngf = open(filename, 'w')
             for routine in routines:
 
                 # Temporary remove contained routines for transformation
@@ -131,17 +164,18 @@ for file in ['../compute/cpg_dia_flu.F90', '../compute/cpcfu.F90', '../compute/c
             f.write('\n') #Add eol so vim doesn't complain
             f.close()
 
-        elif (transform == 'SingleColumnFieldAPIHost' or transform == 'SingleColumnFieldAPIDevice'):
+        elif (transform == 'SCC_HOST' or transform == 'SCC_DEVICE'):
             print(f'call {transform} ')
             print("====_____________================______________================______________=================")
             with Timer(logger=acdc_logger, text=f'[ACDC] {transform} complete transformation' + ' in {:.2f}s'):
-                isHost = (transform == 'SingleColumnFieldAPIHost')
-                suffix='_SINGLE_COLUMN_FIELD_API_' + ('HOST' if isHost else 'DEVICE')
-                filename = '../loki_outputs/' + file[10:-4] + '_single_column_field_api' + ('_host.F90' if isHost else '_device.F90')
+                isHost = (transform == 'SCC_HOST')
+                # suffix='_SINGLE_COLUMN_FIELD_API_' + ('HOST' if isHost else 'DEVICE')
+                filename = output_path + file[:-4] + '_scc' + ('_host.F90' if isHost else '_device.F90')
                 f = open(filename, 'w')
                 for routine in routines:
 
                     new_routine = routine.clone()
+                    new_routine.apply(ReplaceAbortRegions(abort_call = False))
                     new_routine.apply(RemovePragmaRegions())
                     new_routine.apply(RemovePragmas())
                     new_routine.apply(InlineMemberCalls())
@@ -157,13 +191,17 @@ for file in ['../compute/cpg_dia_flu.F90', '../compute/cpcfu.F90', '../compute/c
                         new_routine.apply(FieldAPIPtr(pointerType='host' if isHost else 'device'))
 
                     # Change called subroutines names, import their interface and add !$acc routine directives if relevant
-                    new_routine.apply(AddSuffixToCalls(suffix=suffix, additional_variables=['YLSTACK']))
+                    add_suffix_transform =(AddSuffixToCalls(suffix=transform, additional_variables=['YLSTACK']))
+                    new_routine.apply(add_suffix_transform)
+                    for subroutine in add_suffix_transform.routines_called:
+                        add_to_transforms(subroutine, {transform})
+
                     if not isHost:
                         new_routine.spec.append(Pragma(keyword='acc', content='routine seq'))
                         new_routine.apply(AddACCRoutineDirectives())
 
                     # Add suffix and generate interface file
-                    transfodep = DependencyTransformation(suffix=suffix,  include_path='../loki_outputs/')
+                    transfodep = DependencyTransformation(suffix=transform,  include_path='./')
                     new_routine.apply(transfodep, role='kernel')
 
                     # Turn local arrays into cray pointers on the stack through "alloc" and "temp" macros
@@ -172,20 +210,21 @@ for file in ['../compute/cpg_dia_flu.F90', '../compute/cpcfu.F90', '../compute/c
                 
                     print("writing to file : ", filename)
                     f.write(new_routine.to_fortran())
+
                 f.write('\n') #Add eol so vim doesn't complain
                 f.close()
 
 
-        elif (transform == 'SyncDevice' or transform == 'SyncHost'):
+        elif (transform == 'SYNC_DEVICE' or transform == 'SYNC_HOST'):
             print(f'call {transform} ')
             print("====_____________================______________================______________=================")
-            isHost = (transform == 'SyncHost')
-            filename = '../loki_outputs/' + file[10:-4] + ('_sync_host.F90' if isHost else '_sync_device.F90')
+            isHost = (transform == 'SYNC_HOST')
+            filename = output_path + file[:-4] + ('_sync_host.F90' if isHost else '_sync_device.F90')
              
             f = open(filename, 'w')
             for routine in routines:
                 new_routine = routine.clone()
-
+                new_routine.apply(ReplaceAbortRegions(abort_call = False))
                 
                 # Cleanup
                 new_routine.apply(RemovePragmaRegions())
@@ -194,8 +233,11 @@ for file in ['../compute/cpg_dia_flu.F90', '../compute/cpcfu.F90', '../compute/c
                 new_routine.apply(RemoveComments())
                 #new_routine.apply(RemoveLoops(['JLON', 'JLEV']))
                 new_routine.apply(RemoveLoops())
-                new_routine.apply(AddSuffixToCalls(suffix='_SYNC_HOST' if isHost else '_SYNC_DEVICE'))
+                add_suffix_transform = AddSuffixToCalls(suffix='_SYNC_HOST' if isHost else '_SYNC_DEVICE')
+                new_routine.apply(add_suffix_transform)
                 print("after add suffix")
+                for subroutine in add_suffix_transform.routines_called:
+                    add_to_transforms(subroutine, {transform})
 
                 # Resolve associates because variables might be associated to a Field API member and we need to identify them
                 do_resolve_associates(new_routine)
@@ -207,49 +249,95 @@ for file in ['../compute/cpg_dia_flu.F90', '../compute/cpcfu.F90', '../compute/c
                 # Add suffix and generate interface file
                 transfodep = DependencyTransformation(suffix='_SYNC_HOST' if isHost else '_SYNC_DEVICE',
                                                          # mode='strict' , 
-                                                         include_path='../loki_outputs/')
+                                                         include_path='./')
                 new_routine.apply(transfodep, role='kernel')
                 
                 print("writing to file : ", filename)
                 f.write(new_routine.to_fortran())
             
+                add_to_treated(routine, {transform})
+
             f.write('\n') #Add eol so vim doesn't complain
             f.close()
 
 
-
-
-        elif (transform == 'Parallel'):
+        elif (transform == 'ABORT'):
             print(f'call {transform} ')
             print("====_____________================______________================______________=================")
-            filename = '../loki_outputs/' + file[10:-4] + '_parallel.F90'
+            filename = output_path + file[:-4] + '_abort.F90'
+            print("ouput file opened : ", filename)
             f = open(filename, 'w')
             for routine in routines:
-                # new_routine = routine.clone(contains=None)
                 new_routine = routine.clone()
-                new_routine.apply(RemoveComments())
-                new_routine.apply(InlineMemberCalls())
-                print("after inline")
                 do_resolve_associates(new_routine)
-
-                parallel_transform = MakeParallel() 
-                new_routine.apply(parallel_transform)
-
+                new_routine.apply(RemoveLoops())
+                new_routine.apply(RemoveAssignments())                
+                new_routine.apply(ReplaceAbortRegions())
+                
+                add_suffix_transform = AddSuffixToCalls(suffix='_ABORT')
+                new_routine.apply(add_suffix_transform)
+                
                 new_routine.apply(RemovePragmaRegions())
-                new_routine.apply(RemovePragmas())
+                new_routine.apply(RemoveComments())
+                new_routine.apply(RemoveEmptyConditionals())
+
+                for subroutine in add_suffix_transform.routines_called:
+                    add_to_transforms(subroutine, {'ABORT'})
 
 
-                transfodep = DependencyTransformation(suffix='_PARALLEL', 
-                                                         include_path='../loki_outputs/')
+                transfodep = DependencyTransformation(suffix='_ABORT', include_path='./')
                 new_routine.apply(transfodep, role='kernel')
                 
                 print("writing to file : ", filename)
                 f.write(new_routine.to_fortran())
 
+                add_to_treated(routine, {'ABORT'})
+
+            f.write('\n') 
+            f.close()
+
+
+        elif (transform == 'PARALLEL'):
+            print(f'call {transform} ')
+            print("====_____________================______________================______________=================")
+            filename = output_path + file[:-4] + '_parallel.F90'
+            print("ouput file opened : ", filename)
+            f = open(filename, 'w')
+            for routine in routines:
+                # new_routine = routine.clone(contains=None)
+                new_routine = routine.clone()
+                #new_routine.apply(RemoveComments())
+                #new_routine.apply(InlineMemberCalls())
+                print("after inline")
+                do_resolve_associates(new_routine)
+
+                new_routine.apply(ReplaceAbortRegions())
+
+                parallel_transform = MakeParallel() 
+                new_routine.apply(parallel_transform)
+                print("routine parallele : ", parallel_transform.subroutines_to_transform)
+                # We probably will have for new routines 'PARALLEL' 'SYNC' and 'ABORT' transforms to add
+                for subroutine in parallel_transform.subroutines_to_transform:
+                    add_to_transforms(subroutine, parallel_transform.subroutines_to_transform[subroutine])
+                    
+                new_routine.apply(RemovePragmaRegions())
+
+                transfodep = DependencyTransformation(suffix='_PARALLEL', include_path='./')
+                new_routine.apply(transfodep, role='kernel')
+                
+                print("writing to file : ", filename)
+                f.write(new_routine.to_fortran())
+
+
                 for subroutine in parallel_transform.outlined_routines:
                     f.write('\n')
                     f.write(subroutine.to_fortran())
                 new_routine = None
+
+
+
+                add_to_treated(routine, {'PARALLEL'})
+
             f.write('\n') 
             f.close()
 

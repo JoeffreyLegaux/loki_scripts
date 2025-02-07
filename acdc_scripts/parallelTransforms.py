@@ -20,7 +20,7 @@ from arpege_parameters import params
 
 # import errors should have already been caught in acdc_pragmas.py
 import logical_lst
-from openacc_transform import scc_transform_routine , alloc_temp
+from openacc_transform import scc_transform_routine, alloc_temp
 
 from termcolor import colored
 
@@ -65,10 +65,28 @@ class FindNodesOutsidePragmaRegion(FindNodes):
 
 class MakeParallel(Transformation):
     def __init__(self):        
-        self.block_symbol = DeferredTypeSymbol(name=params.block_dimension, parent = DeferredTypeSymbol(name=params.cpg_opts_variable))
-        self.block_counter = Variable(name='IBL', type=SymbolAttributes(BasicType.INTEGER, kind=Variable(name='JPIM')))
+        self.block_symbol = DeferredTypeSymbol( name=params.block_dimension, 
+                                                parent = DeferredTypeSymbol(name=params.cpg_opts_variable))
+        
+        self.block_counter = Variable(  name=params.block_counter, 
+                                        type=SymbolAttributes(BasicType.INTEGER, kind=Variable(name='JPIM')))
+        
+        self.block_min_symbol = DeferredTypeSymbol( name=self.block_counter.name+'MIN', 
+                                                    parent = DeferredTypeSymbol(name=params.cpg_opts_variable))
+        
+        self.block_max_symbol = DeferredTypeSymbol( name=self.block_counter.name+'MAX',
+                                                    parent = DeferredTypeSymbol(name=params.cpg_opts_variable))
+        
+        self.blocks_loop = Loop(variable=self.block_counter,
+                                #bounds=LoopRange(( IntLiteral(1), self.block_symbol )),
+                                bounds=LoopRange(( self.block_min_symbol, self.block_max_symbol )),
+                                body = None,
+                                pragma = None
+                                )
+         
         self.outlined_routines = []
         self.has_column_loops = False
+        self.subroutines_to_transform = {}
 
     def boundariesArgument(self, var):
         lower_bounds=[]
@@ -103,9 +121,9 @@ class MakeParallel(Transformation):
 
         return nameList
 
-    def decodeParallelPragma(self, pragma):
+    def decodeParallelPragma2(self, pragma):
         #remove opening curly bracket
-        trimmed_bracket = pragma.lower().split('{')[0]
+        trimmed_bracket = pragma.split('{')[0]
 
         splitCommas = trimmed_bracket.split(',')
         clauses = {}
@@ -113,50 +131,31 @@ class MakeParallel(Transformation):
             if '=' in clause:
                 clauses[clause.split('=')[0].strip()] = clause.split('=')[1].strip()
 
-        target = None
-        if (not clauses['target']):
-            print("No target specified, defaulting to HOST")
-            target = "HOST"
-        elif (clauses['target'] == 'host' or clauses['target'] == 'device'):
-            target = clauses['target'].upper()
-        else :
-            print(colored("Unkown target clause !!!!", "red"))
-            exit(1)
+        targets = None
+        if ('TARGET' not in clauses):
+            print("No target specified, defaulting to OPENMP")
+            targets = ['OpenMP']
+        else:
+            targets =  clauses['TARGET'].split('/') 
+         
+            for target in targets:
+                if (target not in ['OpenMP','OpenMPSingleColumn','OpenACCSingleColumn']):
+                    print(colored("Unkown target clause !!!!", "red"))
+                    exit(1)
 
-        scc = False
-        if ('vector' in clauses):
-            if (clauses['vector'] == 'singlecolumn'):
-                scc = True
-            else:
-                print(colored("Unkown vector clause !!!!", "red"))
-                exit(1)
+        
+        name = clauses['NAME'] if 'NAME' in clauses else None
+        return(targets, name)
 
-
-        outline = False
-        if ('outline' in clauses):
-            if (int(clauses['outline']) > 0):
-                outline = True
-            else:
-                print(colored("Unkown outline clause !!!!", "red"))
-                exit(1)
+    def addTransform(self, subroutine, transform):
+        if subroutine not in self.subroutines_to_transform:
+            self.subroutines_to_transform[subroutine] = {transform}
+        else:
+            self.subroutines_to_transform[subroutine].add(transform)
+ 
 
 
-        directive = None
-        if ('directive' in clauses):
-            if (clauses['directive'] == 'openmp' or clauses['directive'] == 'openacc' ):
-                directive = clauses['directive']
-            else:
-                print(colored("Unkown directive clause !!!!", "red"))
-                exit(1)
-
-
-        return(target, scc, outline, directive)
-
-
-
-
-
-    def npromaToArray_nD(self, routine):
+    def npromaToFieldAPI(self, routine):
         """
         Search nproma-sized arrays (from params.nproma_aliases),
         transforms them into relevant ARRAY type,
@@ -170,8 +169,8 @@ class MakeParallel(Transformation):
         
         arrays_types_dimensions = set()
 
-        init_copy_calls = ()
-        wipe_final_calls = ()
+        init_calls = ()
+        final_calls = ()
 
 
         for var in FindVariables().visit(routine.spec):
@@ -185,21 +184,19 @@ class MakeParallel(Transformation):
                 if isinstance(firstdim, RangeIndex):
                     firstdim = firstdim.upper
 
-                # if firstdim in self.nproma_aliases:
                 if firstdim in params.nproma_aliases:
                     isArgument = var in routine.arguments
-                    type_string = "" 
-                    if (var.type.dtype == BasicType.INTEGER):
-                        type_string = "INT"
-                    elif (var.type.dtype == BasicType.LOGICAL):
-                        type_string = "LOG"
+                
+                    #print("variable to FAPI : ", var, type(var))
+                    #print("type : ", type(var.type.kind.name))
 
-                    array_type_dim = f'{type_string}{len(var.dimensions)+1}'
+                    array_type_dim = f'{len(var.dimensions)+1}{var.type.kind.name[-2:]}'
+
 
                     arrays_types_dimensions.add(array_type_dim)
                         
                     new_var = Variable(     name=f'Y{("D" if isArgument else "L")}_{var.name}', 
-                                            type=SymbolAttributes(  DerivedType(name=f'ARRAY_{array_type_dim}D'), 
+                            type=SymbolAttributes(  DerivedType(name=f'FIELD_{array_type_dim}_ARRAY'), 
                                                                     intent=var.type.intent, 
                                                                     scope = routine
                                                                     ) 
@@ -211,16 +208,12 @@ class MakeParallel(Transformation):
 
                     if not isArgument :
 
-                        init_copy_calls += (CallStatement(name = DeferredTypeSymbol(name='INIT', parent = new_var), 
-                                                            arguments=(),
+                        init_calls += (CallStatement(name = DeferredTypeSymbol(name='INIT', parent = new_var), 
+                                                            
                                                             kwarguments = self.boundariesArgument(var) + (('PERSISTENT', LogicLiteral(True)), ),
                                                             scope=routine) ,)
 
-                        init_copy_calls += (CallStatement(name = DeferredTypeSymbol(name='COPY'), arguments=(new_var,), scope=routine), )
-                        
-                        wipe_final_calls += (CallStatement(name = DeferredTypeSymbol(name='WIPE'), arguments=(new_var,), scope=routine), )
-                        
-                        wipe_final_calls += (CallStatement(name = DeferredTypeSymbol(name='FINAL', parent = new_var), 
+                        final_calls += (CallStatement(name = DeferredTypeSymbol(name='FINAL', parent = new_var), 
                                                                 arguments=(), scope=routine), )
 
 
@@ -244,68 +237,72 @@ class MakeParallel(Transformation):
         routine.body = SubstituteExpressions(body_vars_map).visit(routine.body)
 
 
-        routine.body.prepend(init_copy_calls)
-        routine.body.append(wipe_final_calls)
+        routine.body.prepend(init_calls)
+        routine.body.append(final_calls)
 
         # Create imports for module ARRAY_MOD and UTIL_ARRAY_xD_MOD
-        routine.spec.prepend(Import(module="ARRAY_MOD", 
-                symbols=tuple([DeferredTypeSymbol(name=f'ARRAY_{varl}D') for varl in arrays_types_dimensions]) ))
+        #routine.spec.prepend(Import(module="ARRAY_MOD", 
+        #        symbols=tuple([DeferredTypeSymbol(name=f'ARRAY_{varl}D') for varl in arrays_types_dimensions]) ))
 
-        for type_dim in arrays_types_dimensions:
-            routine.spec.prepend(Import(module=f'UTIL_ARRAY_{type_dim}D_MOD'))
+        #for type_dim in arrays_types_dimensions:
+        #    routine.spec.prepend(Import(module=f'UTIL_ARRAY_{type_dim}D_MOD'))
 
         # We will very likely need to declare FIELD_BASIC variables
-        routine.spec.prepend(Import(module="FIELD_MODULE", symbols=(DeferredTypeSymbol(name='FIELD_BASIC'),)))
+        #routine.spec.prepend(Import(module="FIELD_MODULE", symbols=(DeferredTypeSymbol(name='FIELD_BASIC'),)))
+
+        routine.spec.prepend(Import(module="YOMPARALLELMETHOD"))
+        routine.spec.prepend(Import(module="FIELD_BASIC_MODULE"))
 
         return ([nproma_names_map[var] for var in nproma_names_map], locals_dimensions)
 
     def makeOpenMPLoop(self, routine, boundary_variable, region):
 
+        init_bounds = CallStatement(name = DeferredTypeSymbol( name='INIT',
+                                                               parent = boundary_variable),
+                                    arguments=(self.block_counter),
+                                    scope = routine
+                                    )
         loop_pragma = Pragma(   keyword="OMP", 
-                                content = "PARALLEL DO FIRSTPRIVATE ("+ boundary_variable.name +") PRIVATE (IBL" + 
-                                self.getPrivateNameList(region) + ") "
+                                content = "PARALLEL DO FIRSTPRIVATE ("+ boundary_variable.name +") PRIVATE (" + 
+                                self.block_counter.name + self.getPrivateNameList(region) + ") "
                             )
 
         #We prepare the call to update_view for the block index
-        loop_new_statements = CallStatement(name = 
-                                                DeferredTypeSymbol(name="UPDATE_VIEW", 
-                                                                    parent = boundary_variable), arguments=(), 
-                                                                    kwarguments=(('BLOCK_INDEX', self.block_counter),
-                                                                    ),    
-                                            scope=None
+        loop_new_statements = CallStatement(name = DeferredTypeSymbol(name='UPDATE',
+                                                                      parent = boundary_variable), 
+                                            arguments=(self.block_counter), 
+                                            scope=routine
                                             )
+   
+        new_loop = self.blocks_loop.clone(body=(loop_new_statements, region.body,), pragma=(loop_pragma,) )
+
+        return (init_bounds, new_loop,)
+
+    def makeOpenMPSCCLoop(self, routine, boundary_variable, region):
+
+        loop_pragma = Pragma(   keyword="OMP", 
+                                content = "PARALLEL DO PRIVATE ("+ self.block_counter.name + ', JLON,'+
+                                boundary_variable.name + ', YSTACK' + self.getPrivateNameList(region) + ") "
+                            )
+
+        columns_loop = self.makeColumnsLoop(routine, boundary_variable, region)              
     
-        return (loop_pragma, loop_new_statements)
+        new_loop = self.blocks_loop.clone(body=(columns_loop,), pragma=(loop_pragma,) )
+
+        return (new_loop,)
 
 
-    def makeOpenACCLoop(self, routine, boundary_variable):
+    def makeOpenACCSCCLoop(self, routine, boundary_variable, region):
 
         loop_pragma = Pragma(   keyword="ACC", 
                                     content = "PARALLEL LOOP GANG FIRSTPRIVATE ("+ boundary_variable.name +") PRIVATE (IBL)"
                             )
 
-        # We compute the new indices
-            #   YDCPG_BNDS%KBL    = IBL
-            #   YDCPG_BNDS%KSTGLO = 1 + (IBL - 1) * YDCPG_BNDS%KLON
-            #   YDCPG_BNDS%KFDIA  = MIN (YDCPG_BNDS%KLON, YDCPG_BNDS%KGPCOMP - YDCPG_BNDS%KSTGLO + 1)
+        columns_loop = self.makeColumnsLoop(routine, boundary_variable, region, 'OpenACC')              
 
-        loop_new_statements = (Assignment(lhs = Variable(name='KBL', parent = boundary_variable), rhs = Variable(name = 'IBL')),)
-        
-        rhs_string = '1 + (IBL - 1) * YDCPG_BNDS%KLON'
+        new_loop = self.blocks_loop.clone(body=(columns_loop,), pragma=(loop_pragma,) )
 
-        loop_new_statements += (Assignment( lhs = Variable(name='KSTGLO', parent = boundary_variable), 
-                                            rhs = parse_fparser_expression(rhs_string, scope=routine)
-                                          )
-                                ,)
-
-        rhs_string = 'MIN (YDCPG_BNDS%KLON, YDCPG_BNDS%KGPCOMP - YDCPG_BNDS%KSTGLO + 1)'
-
-        loop_new_statements += (Assignment( lhs = Variable(name='KFDIA', parent = boundary_variable), 
-                                            rhs = parse_fparser_expression(rhs_string, scope=routine)
-                                          )
-                                 ,)
-
-        return (loop_pragma, loop_new_statements)
+        return (new_loop,)
 
     def addJLONDefinition(self, routine):
         # jlon_found = False
@@ -315,36 +312,67 @@ class MakeParallel(Transformation):
                                 ,)
 
 
-    def makeOpenACCColumnsLoop(self, call_parallel, boundary_variable, local_boundary_variable, routine):
+    def makeColumnsLoop(self, routine, boundary_variable, region, directive = None):
         # Inner loop on JLON
 
         # YLCPG_BNDS = YDCPG_BNDS
-        assignments = (Assignment(lhs = local_boundary_variable, rhs = boundary_variable), ) 
+        #assignments = (Assignment(lhs = local_boundary_variable, rhs = boundary_variable), ) 
 
         # YLCPG_BNDS%KIDIA = JLON
-        assignments += (Assignment( lhs = Variable(name='KIDIA', parent = local_boundary_variable), 
+        assignments = (Assignment( lhs = Variable(name='KIDIA', parent = boundary_variable), 
                                     rhs = Variable(name='JLON') ), )
         # YLCPG_BNDS%KFDIA = JLON
-        assignments += (Assignment( lhs = Variable(name='KFDIA', parent = local_boundary_variable), 
+        assignments += (Assignment( lhs = Variable(name='KFDIA', parent = boundary_variable), 
                                     rhs = Variable(name='JLON') ), )
         # Compute local stack variables boundaries
-        assignments += (Assignment( lhs = Variable(name='YLSTACK'), rhs = Variable(name='YDSTACK')), )
+        #assignments += (Assignment( lhs = Variable(name='YLSTACK'), rhs = Variable(name='YDSTACK')), )
 
-        # YLSTACK%L = LOC (YDSTACK%F_P%DEVPTR (1,YDCPG_BNDS%KBL))
-        L_string = 'LOC (YDSTACK%F_P%DEVPTR (1,IBL))'
-        assignments += (Assignment( lhs = Variable(name='L', parent = Variable(name='YLSTACK')),
-                                    rhs = parse_fparser_expression(L_string, scope=routine)),)
-        # YLSTACK%U = YLSTACK%L + KIND (YDSTACK%F_P%DEVPTR) * SIZE (YDSTACK%F_P%DEVPTR (:,YDCPG_BNDS%KBL))
-        U_string = 'YLSTACK%L + KIND (YDSTACK%F_P%DEVPTR) * SIZE (YDSTACK%F_P%DEVPTR (:,YDCPG_BNDS%KBL))'
-        assignments += (Assignment( lhs = Variable(name='U', parent = Variable(name='YLSTACK')),
-                                    rhs = parse_fparser_expression(U_string, scope=routine)  ),)                                                   
+        # YLSTACK%L8 = stack_l8 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)
+        l8_string = 'stack_l8 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)'
+
+        assignments += (Assignment( lhs = Variable(name='L8', parent = Variable(name='YLSTACK')),
+                                 rhs = parse_fparser_expression(l8_string, scope=routine)  ),)                                                   
+
+
+        # YLSTACK%U8 = stack_u8 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)
+        u8_string = 'stack_u8 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)'
+
+        assignments += (Assignment( lhs = Variable(name='U8', parent = Variable(name='YLSTACK')),
+                                 rhs = parse_fparser_expression(u8_string, scope=routine)  ),)                                                   
+
+
+        # YLSTACK%L4 = stack_l4 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)
+        l4_string = 'stack_l4 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)'
+
+        assignments += (Assignment( lhs = Variable(name='L4', parent = Variable(name='YLSTACK')),
+                                 rhs = parse_fparser_expression(l4_string, scope=routine)  ),)                                                   
+
+
+        #YLSTACK%U4 = stack_u4 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)
+        u4_string = 'stack_u4 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)'
+
+        assignments += (Assignment( lhs = Variable(name='U4', parent = Variable(name='YLSTACK')),
+                                 rhs = parse_fparser_expression(u4_string, scope=routine)  ),)                                                   
+
+        
+        
+
+
+        upper_bound_string = 'MIN (YDCPG_OPTS%KLON, YDCPG_OPTS%KGPCOMP - (JBLK - 1) * YDCPG_OPTS%KLON)'
+
+        # parse_fparser_expression(upper_bound_string, scope=routine)
+
+        if (directive == 'OpenACC'):
+            loop_pragma = (Pragma(keyword="ACC", content = f'LOOP VECTOR PRIVATE({boundary_variable},  YLSTACK)'),)
+        else : 
+            loop_pragma = None
+
 
         columns_loop = Loop(    variable = Variable(name='JLON'), 
-                                bounds = LoopRange( (Variable(name='KIDIA', parent = boundary_variable),
-                                                    Variable(name='KFDIA', parent = boundary_variable))),
-                                body = (assignments, call_parallel,),
-                                pragma = (Pragma(keyword="ACC", content = f'LOOP VECTOR PRIVATE({local_boundary_variable},  YLSTACK)'),)
-
+                                bounds = LoopRange( (IntLiteral(1),
+                                                    parse_fparser_expression(upper_bound_string, scope=routine))),
+                                body = (assignments, region.body,),
+                                pragma = loop_pragma
                             )
 
 
@@ -354,6 +382,81 @@ class MakeParallel(Transformation):
 
         return columns_loop
 
+    def makeRegionSyncCall(self, routine, target, region_num, body, spec, nproma_arrays):
+        # Create synchronisation call 
+        # building a subroutine that contains only the current region
+        # Apply the Makesync transformation, then append it as a member routine
+        sync_name = routine.name+"_PARALLEL_" + str(region_num) + "_SYNC_" + target
+        sync_routine = routine.clone(body = body, spec = spec, name = sync_name)
+
+        sync_routine.apply(RemoveLoops())
+        add_suffix_transform = AddSuffixToCalls(suffix='_SYNC_' + target)
+        sync_routine.apply(add_suffix_transform)
+        for subroutine in add_suffix_transform.routines_called:
+            self.addTransform(subroutine, 'SYNC_' + target)
+        sync_routine.apply(RemoveUnusedImports())
+           
+        print("makesync")
+        syncTransformation = MakeSync(pointerType=target.lower(), sections = (sync_routine.body,), nproma_arrays=nproma_arrays )
+        sync_routine.apply(syncTransformation)
+        print("after makesync, found ", syncTransformation.total_FAPI_pointers, " pointers")
+
+        # We keep the maximum amount of local pointers needed to pass FieldAPI variables to Sync subroutines
+        #total_FAPI_pointers = max (total_FAPI_pointers, syncTransformation.total_FAPI_pointers)
+
+        sync_routine.apply(RemoveComments())
+        sync_routine.apply(RemovePragmas())
+        sync_routine.apply(RemoveEmptyConditionals())
+
+        print("sync routine built")
+        #return (sync_name, syncTransformation.total_FAPI_pointers)
+        # We insert the sync routine as a member routine of its caller
+        # Therefore we do not need any variable passing or declaration as we manipulate only variables of the caller
+        if not routine.contains:
+            routine.contains = Section(Intrinsic(text="CONTAINS"))
+
+        includes = Section(tuple([n for n in FindNodes(Import).visit(sync_routine.spec) if n.c_import]))
+
+        routine.contains.append(sync_routine.clone(body=sync_routine.body, args=None, spec=includes, contains=None))
+
+        return (sync_name, syncTransformation.total_FAPI_pointers)
+
+
+    def containsOnlyCalls(self, region):
+        for n in FindNodes(Node).visit(region.body):
+            if not (isinstance(n, CallStatement) 
+                    or isinstance(n, Comment)
+                    or isinstance(n, CommentBlock)):
+                        return False 
+        return True
+
+    def makeParallelSubroutine(self, routine, region, region_num, scc, target='host'):
+        print("make parallel subroutine : ", routine, target, region)
+        new_subroutine = routine.clone( name = routine.name + "_PARALLEL_" + str(region_num), 
+                                                body = region.body,
+                                                spec = routine.spec.clone(),
+                                                contains = None)
+
+        add_suffix_transform = AddSuffixToCalls(  suffix=('_SCC'), additional_variables=['YDSTACK=YLSTACK'] ) 
+        new_subroutine.apply(add_suffix_transform)
+        for subroutine in add_suffix_transform.routines_called:
+            self.addTransform(subroutine, 'SCC_'+target.upper())
+
+        new_subroutine.apply(RemoveUnusedImports())
+        if scc:
+            true_symbols, false_symbols=logical_lst.symbols()
+            false_symbols.append('LHOOK')
+
+            scc_transform_routine(new_subroutine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols)
+
+        new_subroutine.apply(RemoveComments())
+        new_subroutine.apply(RemovePragmas())
+        new_subroutine.apply(FieldAPIPtr(pointerType=target))  
+        
+        return new_subroutine.body
+        # self.outlined_routines.append(new_subroutine)
+
+
     def transform_parallel_regions(self, routine):
 
         unmodified_spec = routine.spec.clone()
@@ -362,11 +465,16 @@ class MakeParallel(Transformation):
         routine.variables += (self.block_counter,)
 
         # Use custom visitor to add PARALLEL suffix and stack variable to CallStatements outside PragmaRegions
-        routine.apply(AddSuffixToCalls(suffix='_PARALLEL', custom_visitor = FindNodesOutsidePragmaRegion, additional_variables = ['YDSTACK']) )
+        add_suffix_transform = AddSuffixToCalls(suffix='_PARALLEL', custom_visitor = FindNodesOutsidePragmaRegion, additional_variables = ['YDSTACK'])
+        routine.apply(add_suffix_transform)
 
+
+        for subroutine in add_suffix_transform.routines_called:
+            self.addTransform(subroutine, 'PARALLEL')
+       
 
         # Transform arrays of NPROMA size into ARRAY_XD types
-        nproma_arrays, local_dimensions=self.npromaToArray_nD(routine)
+        nproma_arrays, local_dimensions=self.npromaToFieldAPI(routine)
 
         # Search the local variable that contains the boundaries
         boundary_variable = None
@@ -390,181 +498,238 @@ class MakeParallel(Transformation):
         local_stack = Variable(name="YLSTACK", type=SymbolAttributes(DerivedType(name="STACK"), scope = routine))
 
         for region in FindNodes(PragmaRegion).visit(routine.body):
-            print("region : ", region.pragma)
+            print("region : ", region.pragma, region.pragma.content)
             region_num = region_num + 1
 
-            (target, scc, outline, directive) = self.decodeParallelPragma(region.pragma.content)
-    
+            #(target, scc, outline, directive) = self.decodeParallelPragma(region.pragma.content)
+            (targets, name) = self.decodeParallelPragma2(region.pragma.content)
+   
+            if not name:
+                name = f'REGION_{region_num}'
 
-            # Directives treatments :
-            # TARGET = HOST|DEVICE
-            # OUTLINE = 0 | 1+   =>  if >0 content of the section is placed in an separate subroutine 
-            #                             (mandatory for declaring stack pointers)
-            # VECTOR = SINGLECOLUMN  =>   SCC transformation
-            # DIRECTIVE = OPENMP|OPENACC   
-            # 
-            # TARGET=HOST only => OpenMP directive, no outlining 
-            # TARGET=DEVICE, VECTOR=SINGLECOLUMN, OUTLINE=1  => default GPU implementation  (DIRECTIVE=OPENACC implied)
-            # OpenMP compatible with SINGLECOLUMN and OUTLINE, but not DEVICE !
-            # OpenACC only compatible with DEVICE + SINGLECOLUMN + OUTLINE
+            print("targets and name : ", targets, name)
+   
+                       #Generate sync subroutines for [HOST, DEVICE]
+            archs = [False, False]
+            for target in targets:  
+                if 'OpenMP' in target:
+                    archs[0] = True
+                elif 'OpenACC' in target:
+                    archs[1] = True
+
+            sync_names = [None, None]
+            if archs[0]:
+                (sync_names[0], sync_FAPI_pointers) = self.makeRegionSyncCall(routine, 'HOST', region_num, region.body, unmodified_spec, nproma_arrays)
+                # We keep the maximum amount of local pointers needed to pass FieldAPI variables to Sync subroutines
+                total_FAPI_pointers = max (total_FAPI_pointers, sync_FAPI_pointers)
+            if archs[1]:
+                (sync_names[1], sync_FAPI_pointers) = self.makeRegionSyncCall(routine, 'DEVICE', region_num, region.body, unmodified_spec, nproma_arrays)
+                total_FAPI_pointers = max (total_FAPI_pointers, sync_FAPI_pointers)
+
+            print("sync_names ? ", sync_names)
+             
+            abort_calls=()
+            for call in FindNodes(CallStatement).visit(region.body):
+                print("call in region : ", call)
+                self.addTransform(call.name.name, 'ABORT')
+                abort_calls += (call.clone(name= DeferredTypeSymbol(name=f'{call.name}_ABORT')),)
             
-            #Default values
-            if not directive :
-                directive = 'openmp'
 
-            if directive == 'openacc' and not (target == 'DEVICE' and scc and outline):
-                print(colored(f'Incompatible acdc clauses in pragma {region.pragma.content}', 'red'))
-                exit(1)
-
-            if directive == 'openmp' and target == 'DEVICE':
-                print(colored(f'Incompatible acdc clauses (openmp and device) in pragma {region.pragma.content}', 'red'))
-                exit(1)
-
-
-            # Create synchronisation call 
-            # building a subroutine that contains only the current region
-            # Apply the Makesync transformation, then append it as a member routine
-            sync_name = routine.name+"_PARALLEL_" + str(region_num) + "_SYNC_" + target
-            sync_routine = routine.clone(body = region.body, spec = unmodified_spec, name = sync_name)
-
-            sync_routine.apply(RemoveLoops())
-            sync_routine.apply(AddSuffixToCalls(suffix='_SYNC_' + target))
-            sync_routine.apply(RemoveUnusedImports())
-
-            syncTransformation = MakeSync(pointerType=target.lower(), sections = (sync_routine.body,), nproma_arrays=nproma_arrays )
-            sync_routine.apply(syncTransformation)
-            # We keep the maximum amount of local pointers needed to pass FieldAPI variables to Sync subroutines
-            total_FAPI_pointers = max (total_FAPI_pointers, syncTransformation.total_FAPI_pointers)
-
-            sync_routine.apply(RemoveComments())
-            sync_routine.apply(RemovePragmas())
-            sync_routine.apply(RemoveEmptyConditionals())
-
-
-            # We insert the sync routine as a member routine of its caller
-            # Therefore we do not need any variable passing or declaration as we manipulate only variables of the caller
-            if not routine.contains:
-                routine.contains = Section(Intrinsic(text="CONTAINS"))
-
-            includes = Section(tuple([n for n in FindNodes(Import).visit(sync_routine.spec) if n.c_import]))
             
-            routine.contains.append(sync_routine.clone(body=sync_routine.body, args=None, spec=includes, contains=None))
+            for index,target in enumerate(targets):
+
+                call_sync = CallStatement(name = DeferredTypeSymbol(name=sync_names[1] if 'OpenACC' in target else sync_names[0]), 
+                                                arguments=(), scope=None )
+  
+                #Create the replacement body for the region for current target
+
+                if (target == 'OpenMP'):
+
+                   # Default behaviour : apply FieldAPI transformation to the loop body
+                    
+                    new_region = FieldAPIPtr(pointerType='host', node=region).transform_node(region, routine)
+
+                    new_loop = self.makeOpenMPLoop(routine, local_boundary_variable, new_region)
+                    new_body = (call_sync, new_loop,)
+                elif (target == 'OpenMPSingleColumn'):
+
+                    # Check for outline necessity : if region only contains calls, directly call SCC variants
+                    # Otherwise, create a contained subroutine with the transformed region
+                    # new_region = FieldAPIPtr(pointerType='host', node=region).transform_node(region, routine)
+                    # new_region = region.clone()
+                    if self.containsOnlyCalls(region):
+                        new_region = FieldAPIPtr(pointerType='device', node=region).transform_node(new_region, routine)
+
+                        add_suffix_transform = AddSuffixToCalls(  suffix=('_SCC_HOST'), additional_variables=['YDSTACK=YLSTACK'] )
+                        new_region = add_suffix_transform.transform_node(new_region, routine)
+                        for subroutine in add_suffix_transform.routines_called:
+                            self.addTransform(subroutine, 'SCC_HOST')
+                    else:
+                        # new_region = self.makeParallelSubroutine(routine, new_region, region_num, scc=True, target='host')
+                        new_region = self.makeParallelSubroutine(routine, region, region_num, scc=True, target='host')
+                        
+                        # new_region = FieldAPIPtr(pointerType='host', node=new_region).transform_node(new_region, routine)
+                        # new_region = region.clone() 
 
 
-            call_sync = CallStatement(name = DeferredTypeSymbol(name=sync_name), arguments=(), scope=None )
+                    new_loop = self.makeOpenMPSCCLoop(routine, local_boundary_variable, new_region)
+                    new_body = (call_sync, new_loop,)                    
+                
+                elif (target == 'OpenACCSingleColumn'):
+                    if self.containsOnlyCalls(region):
+                        new_region = FieldAPIPtr(pointerType='device', node=region).transform_node(new_region, routine)
+
+                        add_suffix_transform = AddSuffixToCalls(  suffix=('_SCC_DEVICE'), additional_variables=['YDSTACK=YLSTACK'] )
+                        new_region = add_suffix_transform.transform_node(new_region, routine)
+                        for subroutine in add_suffix_transform.routines_called:
+                            self.addTransform(subroutine, 'SCC_DEVICE')
+                    else:
+                        # new_region = region.clone()
+                        # new_region = self.makeParallelSubroutine(routine, new_region, region_num, scc=True, target='device')
+                        new_region = self.makeParallelSubroutine(routine, region, region_num, scc=True, target='device')
+                    
+                    new_loop = self.makeOpenACCSCCLoop(routine, local_boundary_variable, new_region)
+                    new_body = (call_sync, new_loop,)                    
+                else :
+                    print("Unknown target !!!! ", target)
+                    new_body = (region.body,)
 
 
-            if directive == 'openmp': 
-                (loop_pragma, loop_new_statements) = self.makeOpenMPLoop(routine, boundary_variable, region)
+                #Create nested conditionals with call to LPARALLELMETHOD in conditions
+
+                expr = InlineCall(function=DeferredTypeSymbol(name='LPARALLELMETHOD'), 
+                        parameters=(StringLiteral(target.upper()),StringLiteral(f'{routine.name}:{name}'), ))
+             
+                if (index == 0) : 
+                    outer_cond = Conditional(condition=expr, body=new_body)
+                    current_cond = outer_cond
+
+                elif (index < len(targets)):
+                    new_cond = Conditional(condition=expr ,body=new_body )
+                    current_cond._update(else_body = new_cond)
+                    current_cond._update(has_elseif = True)
+                    current_cond = new_cond
+
+                #Final ELSE branch only contains a call to ABOR1
+                current_cond._update(else_body = (CallStatement(name = DeferredTypeSymbol(name='ABOR1'),
+                                                                arguments=(StringLiteral(f'{routine.name}_PARALLEL : METHOD WAS NOT FOUND')),
+                                                                scope=routine
+                                                                ),
+                                                )
+                                    )
+
+            routine.body = Transformer({region:(abort_calls,outer_cond)}).visit(routine.body)
+
+            addFieldAPIPointers(routine, total_FAPI_pointers)
+
+            routine.variables += (local_boundary_variable, local_stack,)   
+
+            # return
 
 
-            elif directive == 'openacc':
-                (loop_pragma, loop_new_statements) = self.makeOpenACCLoop(routine, boundary_variable)
 
+            # if not outline:
+            #     region = AddSuffixToCalls(  suffix=('_SINGLE_COLUMN' if scc else '') + '_FIELD_API_' + target, 
+            #                                 node=region, 
+            #                                 additional_variables=['YLSTACK'] if scc else []).transform_subroutine(routine = routine)
 
+            # if outline:
 
-            if not outline:
-                region = AddSuffixToCalls(  suffix=('_SINGLE_COLUMN' if scc else '') + '_FIELD_API_' + target, 
-                                            node=region, 
-                                            additional_variables=['YLSTACK'] if scc else []).transform_subroutine(routine = routine)
+            #     new_subroutine = routine.clone( name = routine.name + "_PARALLEL_" + str(region_num), 
+            #                                     body = region.body,
+            #                                     spec = routine.spec.clone(),
+            #                                     contains = None)
 
-            if outline:
+            #     new_subroutine.apply(AddSuffixToCalls(  suffix=('_SINGLE_COLUMN' if scc else '') + '_FIELD_API_' + target, 
+            #                                 # node=region, 
+            #                                 additional_variables=['YLSTACK'] if scc else []))
 
-                new_subroutine = routine.clone( name = routine.name + "_PARALLEL_" + str(region_num), 
-                                                body = region.body,
-                                                spec = routine.spec.clone(),
-                                                contains = None)
+            #     new_subroutine.apply(RemoveUnusedImports())
 
-                new_subroutine.apply(AddSuffixToCalls(  suffix=('_SINGLE_COLUMN' if scc else '') + '_FIELD_API_' + target, 
-                                            # node=region, 
-                                            additional_variables=['YLSTACK'] if scc else []))
+            #     if scc:
+            #         true_symbols, false_symbols=logical_lst.symbols()
+            #         false_symbols.append('LHOOK')
 
-                new_subroutine.apply(RemoveUnusedImports())
+            #         scc_transform_routine(new_subroutine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols)
 
-                if scc:
-                    true_symbols, false_symbols=logical_lst.symbols()
-                    false_symbols.append('LHOOK')
-
-                    scc_transform_routine(new_subroutine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols)
-
-                new_subroutine.apply(FieldAPIPtr(pointerType=target.lower()))
-                new_subroutine.apply(RemoveComments())
-                new_subroutine.apply(RemovePragmas())
+            #     new_subroutine.apply(FieldAPIPtr(pointerType=target.lower()))
+            #     new_subroutine.apply(RemoveComments())
+            #     new_subroutine.apply(RemovePragmas())
   
                 # We do not want JLON and YSTACK in the arguments
-                remove_transform = RemoveUnusedVariables(['JLON', 'YLSTACK'])
-                new_subroutine.apply(remove_transform)
+                # remove_transform = RemoveUnusedVariables(['JLON', 'YLSTACK'])
+                # new_subroutine.apply(remove_transform)
 
-                new_subroutine.spec.append(Pragma(keyword='acc', content='routine seq'))
-                if directive == 'openacc':
-                    new_subroutine.apply(AddACCRoutineDirectives())
+                # new_subroutine.spec.append(Pragma(keyword='acc', content='routine seq'))
+                # if directive == 'openacc':
+                #     new_subroutine.apply(AddACCRoutineDirectives())
 
-                self.outlined_routines.append(new_subroutine)
-
-
-                call_arguments = remove_transform.used_symbols
-                call_arguments = SubstituteExpressions({
-                                        Scalar(name=boundary_variable.name):Scalar(name=local_boundary_variable.name),
-                                        Scalar(name='YDSTACK'):Scalar(name='YLSTACK')
-                                        }).visit(call_arguments)
-
-                call_parallel = CallStatement(name=new_subroutine.procedure_symbol, arguments=call_arguments)
+                # self.outlined_routines.append(new_subroutine)
 
 
+                # call_arguments = remove_transform.used_symbols
+                # call_arguments = SubstituteExpressions({
+                #                         Scalar(name=boundary_variable.name):Scalar(name=local_boundary_variable.name),
+                #                         Scalar(name='YDSTACK'):Scalar(name='YLSTACK')
+                #                         }).visit(call_arguments)
 
-                if directive == 'openacc':
-                    columns_loop = self.makeOpenACCColumnsLoop(call_parallel, boundary_variable, local_boundary_variable, routine)
+                # call_parallel = CallStatement(name=new_subroutine.procedure_symbol, arguments=call_arguments)
+
+
+
+                # if directive == 'openacc':
+                #     columns_loop = self.makeOpenACCColumnsLoop(call_parallel, boundary_variable, local_boundary_variable, routine)
                 
-            if not outline:
-                loop_body = region.body
-            else:
-                if directive == 'openacc':
-                    loop_body = columns_loop
-                else:
-                    loop_body = call_parallel
+            # if not outline:
+            #     loop_body = region.body
+            # else:
+            #     if directive == 'openacc':
+            #         loop_body = columns_loop
+            #     else:
+            #         loop_body = call_parallel
 
-            blocks_loop = Loop( variable=self.block_counter, 
-                                bounds=LoopRange(( IntLiteral(1), self.block_symbol )), 
-                                body = (loop_new_statements, loop_body,), 
-                                pragma = (loop_pragma,)   
-                                )
-            routine.body = Transformer({region:(call_sync,blocks_loop,)}).visit(routine.body)
+            # blocks_loop = Loop( variable=self.block_counter, 
+            #                     bounds=LoopRange(( IntLiteral(1), self.block_symbol )), 
+            #                     body = (loop_new_statements, loop_body,), 
+            #                     pragma = (loop_pragma,)   
+            #                     )
+            # routine.body = Transformer({region:(call_sync,blocks_loop,)}).visit(routine.body)
 
-            if not outline:
-                # Default behaviour : apply FieldAPI transformation to the loop body
-                routine.apply(FieldAPIPtr(pointerType=target.lower(), node=blocks_loop ))
+            # if not outline:
+            #     # Default behaviour : apply FieldAPI transformation to the loop body
+            #     routine.apply(FieldAPIPtr(pointerType=target.lower(), node=blocks_loop ))
 
 
         # We remove remaining imports only after having treated all Parallel blocks 
-        routine.apply(RemoveUnusedImports())
+        # routine.apply(RemoveUnusedImports())
 
-        routine.variables += (local_boundary_variable, local_stack,)   
+        # routine.variables += (local_boundary_variable, local_stack,)   
 
-        routine.body = Transformer(regions_map).visit(routine.body)
-        addFieldAPIPointers(routine, total_FAPI_pointers)
+        # routine.body = Transformer(regions_map).visit(routine.body)
+        # addFieldAPIPointers(routine, total_FAPI_pointers)
 
     def transform_subroutine(self, routine, **kwargs):
 
-        
+
         self.transform_parallel_regions(routine)
 
         # In a routine with parallel blocks, we expect to have received a stack variable
-        routine.spec.prepend(Import(module="STACK_MOD"))
-        routine.arguments += (Variable(name="YDSTACK", type=SymbolAttributes(DerivedType(name="STACK"), intent='in')) ,)
+        #routine.spec.prepend(Import(module="STACK_MOD"))
+        #routine.arguments += (Variable(name="YDSTACK", type=SymbolAttributes(DerivedType(name="STACK"), intent='in')) ,)
 
         # get updatable fields and change their intent into INOUT
-        FieldAPI_updatables = retrieve('../scripts/update_view.dat')
+        FieldAPI_updatables = retrieve('../../update_view.dat')
 
         #                      'CPG_BNDS_TYPE'
         FieldAPI_updatables[params.boundaries_type] = 1
         var_map = {}
-        for var in routine.arguments :
-            if (isinstance(var.type.dtype, DerivedType)):
-                typename = var.type.dtype.name
-                if typename in FieldAPI_updatables:
-                    if FieldAPI_updatables[typename]:
-                        new_type=var.type.clone(intent='inout')
-                        var_map[var]= var.clone(type=new_type)
-
-        routine.spec = SubstituteExpressions(var_map).visit(routine.spec)
+        #for var in routine.arguments :
+        #    if (isinstance(var.type.dtype, DerivedType)):
+        #        typename = var.type.dtype.name
+        #        if typename in FieldAPI_updatables:
+        #            if FieldAPI_updatables[typename]:
+        #                new_type=var.type.clone(intent='inout')
+        #                var_map[var]= var.clone(type=new_type)
+        
+        #routine.spec = SubstituteExpressions(var_map).visit(routine.spec)
 
