@@ -1,7 +1,7 @@
 from loki import (Frontend, Sourcefile, FindNodes, Loop, Node, Intrinsic, Subroutine, Transformer, NestedTransformer, 
     PragmaRegion, DerivedType, Transformation, CallStatement, SymbolAttributes, BasicType, FindTypedSymbols, FindVariables, SubstituteExpressions )
 
-from loki.ir import Section, Comment, CommentBlock, VariableDeclaration, Pragma, PragmaRegion, Import, Assignment, Conditional, LeafNode, InternalNode, Associate
+from loki.ir import Section, Comment, CommentBlock, VariableDeclaration, Pragma, PragmaRegion, Import, Assignment, Conditional, LeafNode, InternalNode, Associate, pprint
 
 from loki.transformations import inline_member_procedures
 
@@ -11,8 +11,9 @@ from loki.frontend.fparser import *
 from loki.logging import info, error
 from loki.analyse import *
 
-from codetiming import Timer
+from arpege_parameters import params
 
+from codetiming import Timer
 from storable import retrieve
 
 
@@ -104,7 +105,7 @@ class AddSuffixToCalls(Transformation):
         calls_names = set()
         call_map = {}
         for call in visitor(CallStatement).visit(node.body):
-            if call.name != 'ABOR1':
+            if (call.name not in params.ignored_subroutines):
                 if call.name == 'DR_HOOK':
                     list_arguments = list(call.arguments)
                     list_arguments[0] = StringLiteral(list_arguments[0].value + self.suffix)
@@ -260,11 +261,22 @@ class RemoveLoops(Transformation):
 
 class RemoveEmptyConditionals(Transformation):
     def transform_subroutine(self, routine, **kwargs):
-        cond_map = {}
+        # Cleanup might leave ocnditional with empty ELSEIF which break reconstruction
+        # Simply removing all elseif attributes prevents this
         for cond in FindNodes(Conditional).visit(routine.body):
-            if not cond.body and not cond.else_body :
-                cond_map[cond] = None 
-        routine.body=Transformer(cond_map).visit(routine.body)
+            cond._update(has_elseif = False)
+        cond_map = {}
+        check = True
+        while check:
+            for cond in FindNodes(Conditional).visit(routine.body): 
+                if not cond.body and not cond.else_body :
+                    cond_map[cond] = None 
+            if (cond_map == {}):
+                check = False
+            else :
+                routine.body=NestedTransformer(cond_map).visit(routine.body)
+                cond_map = {}
+
 
 class RemoveUnusedVariables(Transformation):
     def __init__(self, symbols_to_remove=[]):
