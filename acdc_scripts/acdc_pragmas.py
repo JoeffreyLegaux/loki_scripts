@@ -17,7 +17,8 @@ import sys, traceback
 #===================================================================================================
 # Importing SCC transforms from Erwan 
 #===================================================================================================
-sys.path.append('/home/legaux/meteo/models/build_scc_erwan/transformation/')
+#sys.path.append('/home/legaux/meteo/models/build_scc_erwan/transformation/')
+sys.path.append('/home/ext/cf/ccom/legauxj/gpupack/build_scc/transformation/')
 
 try :
     from openacc_transform import scc_transform_routine , alloc_temp
@@ -93,15 +94,17 @@ def attach_acdc_regions(routine):
 acdc_logger = info # perf pour log fichier
 
 #source_path = '../../loki_WIP/src/local/'
-source_path = '../../local/'
+source_path = '../../loki_WIP/src/'
 
 
-output_path = source_path
-output_path_scc = source_path
+output_path = source_path + '/local/'
+output_path_scc = output_path
 # Start at CPG_DYN_SLG with empty list of forced transformations
-# routines_to_transform = {'CPG_DYN_SLG':{'PARALLEL'},}
 
+#routines_to_transform = {'CPG_DYN_SLG':{'PARALLEL'},}
 routines_to_transform = {'SIGAM_GP':{'ABORT'},}
+#routines_to_transform = {'LASURE':{'ABORT'},}
+
 treated_routines = {}
 
 while (len(routines_to_transform) > 0):
@@ -136,7 +139,9 @@ while (len(routines_to_transform) > 0):
     
 
     for transform in transformations_to_generate:
-        # COmpletely useless now ????
+        # ========================================
+        # Completely useless now ????
+        # ========================================
         if (transform == 'FieldAPIHost'):
             filename = '../loki_outputs/' + file[10:-4] + '_field_api_host.F90'
             ngf = open(filename, 'w')
@@ -170,7 +175,8 @@ while (len(routines_to_transform) > 0):
             with Timer(logger=acdc_logger, text=f'[ACDC] {transform} complete transformation' + ' in {:.2f}s'):
                 isHost = (transform == 'SCC_HOST')
                 # suffix='_SINGLE_COLUMN_FIELD_API_' + ('HOST' if isHost else 'DEVICE')
-                filename = output_path + file[:-4] + '_scc' + ('_host.F90' if isHost else '_device.F90')
+                #filename = output_path + file[:-4] + '_scc' + ('_host.F90' if isHost else '_device.F90')
+                filename = (source_path + file[:-4]).replace('main', 'local') + '_scc' + ('_host.F90' if isHost else '_device.F90')
                 f = open(filename, 'w')
                 for routine in routines:
 
@@ -219,7 +225,8 @@ while (len(routines_to_transform) > 0):
             print(f'call {transform} ')
             print("====_____________================______________================______________=================")
             isHost = (transform == 'SYNC_HOST')
-            filename = output_path + file[:-4] + ('_sync_host.F90' if isHost else '_sync_device.F90')
+            #filename = output_path + file[:-4] + ('_sync_host.F90' if isHost else '_sync_device.F90')
+            filename = (source_path + file[:-4]).replace('main', 'local') + ('_sync_host.F90' if isHost else '_sync_device.F90')
              
             f = open(filename, 'w')
             for routine in routines:
@@ -264,7 +271,9 @@ while (len(routines_to_transform) > 0):
         elif (transform == 'ABORT'):
             print(f'call {transform} ')
             print("====_____________================______________================______________=================")
-            filename = output_path + file[:-4] + '_abort.F90'
+            #filename = output_path + file[:-4] + '_abort.F90'
+            print("source path ", source_path)
+            filename = (source_path + file[:-4]).replace('main', 'local') + '_abort.F90'
             print("ouput file opened : ", filename)
             f = open(filename, 'w')
             for routine in routines:
@@ -300,7 +309,8 @@ while (len(routines_to_transform) > 0):
         elif (transform == 'PARALLEL'):
             print(f'call {transform} ')
             print("====_____________================______________================______________=================")
-            filename = output_path + file[:-4] + '_parallel.F90'
+            #filename = output_path + file[:-4] + '_parallel.F90'
+            filename = (source_path + file[:-4]).replace('main', 'local') + '_parallel.F90'
             print("ouput file opened : ", filename)
             f = open(filename, 'w')
             for routine in routines:
