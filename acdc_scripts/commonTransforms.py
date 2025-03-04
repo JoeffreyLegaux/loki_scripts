@@ -39,13 +39,13 @@ class RemovePragmas(Transformation):
     def transform_subroutine(self, routine, **kwargs):
         pragmas_map = {}
         for pragma in FindNodes(Pragma).visit(routine.body):
-            if (pragma.keyword.lower() == 'acdc'):
-                pragmas_map[pragma] = None
+            #if (pragma.keyword.lower() == 'acdc'):
+            pragmas_map[pragma] = None
         routine.body = Transformer(pragmas_map).visit(routine.body)
         pragmas_map = {}
         for pragma in FindNodes(Pragma).visit(routine.spec):
-            if (pragma.keyword.lower() == 'acdc'):
-                pragmas_map[pragma] = None
+            #if (pragma.keyword.lower() == 'acdc'):
+            pragmas_map[pragma] = None
         routine.spec = Transformer(pragmas_map).visit(routine.spec)
 
 
