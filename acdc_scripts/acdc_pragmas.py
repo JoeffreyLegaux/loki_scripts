@@ -31,9 +31,9 @@ else:
     print (colored("build_scc : scc_transform_routine imported", "green"))
 
 try :
-   import logical_lst
+   import logical_lst, logical
 except ImportError as error:
-   print (colored("build_scc : logical_lst not imported, check sys.path !", "red"))
+   print (colored("build_scc : logical_lst or logical not imported, check sys.path !", "red"))
    print("Error message : ", error)
    traceback.print_exc()
    exit(1)
@@ -91,6 +91,8 @@ def attach_acdc_regions(routine):
     PragmaRegionAttacher(pragma_pairs=pairs, inplace=True).visit(routine.body)
 
 
+true_symbols, false_symbols=logical_lst.symbols()
+
 acdc_logger = info # perf pour log fichier
 
 #source_path = '../../loki_WIP/src/local/'
@@ -102,8 +104,11 @@ output_path_scc = output_path
 # Start at CPG_DYN_SLG with empty list of forced transformations
 
 #routines_to_transform = {'CPG_DYN_SLG':{'PARALLEL'},}
-routines_to_transform = {'SIGAM_GP':{'ABORT'},}
+#routines_to_transform = {'VERINT':{'ABORT','SYNC_DEVICE'},}
+routines_to_transform = {'VERINT':{'SYNC_DEVICE'},}
+#routines_to_transform = {'SIGAM_GP':{'ABORT'},}
 #routines_to_transform = {'LASURE':{'ABORT'},}
+#routines_to_transform = {'GPRCP_EXPL':{'PARALLEL'},}
 
 treated_routines = {}
 
@@ -139,12 +144,20 @@ while (len(routines_to_transform) > 0):
     
 
     for transform in transformations_to_generate:
+
+        logical.transform_subroutine(routine, true_symbols, false_symbols) 
+        filename = (source_path + file[:-4]).replace('main', 'local') + 'logical.F90'
+        f = open(filename, 'w')
+        f.write(routine.to_fortran())
+        f.write('\n') #Add eol so vim doesn't complain
+        f.close()
+
         # ========================================
         # Completely useless now ????
         # ========================================
         if (transform == 'FieldAPIHost'):
             filename = '../loki_outputs/' + file[10:-4] + '_field_api_host.F90'
-            ngf = open(filename, 'w')
+            f = open(filename, 'w')
             for routine in routines:
 
                 # Temporary remove contained routines for transformation
@@ -285,7 +298,9 @@ while (len(routines_to_transform) > 0):
                 
                 add_suffix_transform = AddSuffixToCalls(suffix='_ABORT')
                 new_routine.apply(add_suffix_transform)
-                
+            
+
+                new_routine.apply(RemovePragmas())
                 new_routine.apply(RemovePragmaRegions())
                 new_routine.apply(RemoveComments())
                 new_routine.apply(RemoveEmptyConditionals())
