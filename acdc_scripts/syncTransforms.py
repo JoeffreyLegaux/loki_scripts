@@ -1,5 +1,5 @@
 from loki import (Frontend, Sourcefile, FindNodes, Loop, Node, Intrinsic, Subroutine, Transformer, NestedTransformer, 
-    PragmaRegion, DerivedType, Transformation, CallStatement, SymbolAttributes, BasicType, FindTypedSymbols, FindVariables, SubstituteExpressions  )
+    PragmaRegion, DerivedType, Transformation, CallStatement, SymbolAttributes, BasicType, FindTypedSymbols, FindVariables, SubstituteExpressions, FindInlineCalls  )
 
 from loki.ir import Section, Comment, CommentBlock, VariableDeclaration, Pragma, Import, Assignment, Conditional, LeafNode, InternalNode, Associate
 
@@ -42,6 +42,21 @@ def get_FieldAPI_variables(routine, fieldAPI_types):
                 fieldAPI_variables[var.name] = typename
     return fieldAPI_variables
 
+def get_pointers_to_FieldAPI(routine, nproma_variables):
+    #print("nproma variables : ", nproma_variables)
+    ptr_list = []
+    for var in routine.variables :
+        if var.type.pointer and var.type.dtype.name != 'FIELD_BASIC':
+            ptr_list.append(var.name)
+    FieldAPI_ptrs = set()
+    for assign in FindNodes(Assignment).visit(routine.body):
+        if assign.ptr :
+            if assign.lhs.name in ptr_list:                
+                if assign.rhs.name in nproma_variables: 
+                    FieldAPI_ptrs.add(assign.lhs.name)
+    #print("FAPIptrs : ", FieldAPI_ptrs)
+    return FieldAPI_ptrs
+
 def addFieldAPIPointers(routine, number_of_pointers):
     for i in range(number_of_pointers):
         routine.variables += (Variable( name=f'YLFLDPTR{i}', 
@@ -67,8 +82,10 @@ class MakeSync(Transformation):
             exit(1)
         self.map_reads = {}
         self.map_writes = {}
+        self.map_static = {}
         self.map_nodes = {}
         self.nproma_vars_names = nproma_arrays if nproma_arrays else []
+        self.nproma_pointers = []
         self.sections = sections
         self.total_FAPI_pointers=0
 
@@ -152,55 +169,69 @@ class MakeSync(Transformation):
 
             # Empty nodes might appear from previous simplifications of the code, simply ignore them
             if (node != ()):
+                static_list = []
                 for c in node:
-                    (reads, writes) = self.findAssigns(c)
+                    (reads, writes, static_reads, static_writes) = self.findAssigns(c)
 
                     writes_list.extend([define for define in writes if define not in writes_list])
                     reads_list.extend([define for define in reads if define not in reads_list])
 
-                # writes take precedence over reads
+                static_list += [(r, 'R') for r in static_reads] +  [(w, 'W') for w in static_writes]
+                # =======================!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                # ici differencier inter du reste !!!!!!
+
+
                 reads_list = [r for r in reads_list if r not in writes_list]
 
                 self.map_reads[node] = reads_list
                 self.map_writes[node] = writes_list
-            return(reads_list, writes_list)
+                self.map_static[node] = static_list
+            return(reads_list, writes_list, [], [])
 
 
         elif isinstance(node, Assignment):
+            if node.ptr :
+                return([], [], [], [])
+            else :
+                writes = [symbol
+                            for test, symbol in [
+                                self.isNpromaOrFieldAPI(s) 
+                                for s in node.defines_symbols
+                                ]
+                            if test ]
 
-            writes = [symbol
-                        for test, symbol in [
-                            self.isNpromaOrFieldAPI(s) 
-                            for s in node.defines_symbols
-                            ]
-                        if test ]
+                reads = [symbol
+                            for test, symbol in [
+                                self.isNpromaOrFieldAPI(s) 
+                                for s in node.uses_symbols
+                                # Writes take precedence over reads
+                                if s not in node.defines_symbols
+                                ]
+                            if test ]                        
+                
+                static_reads = [r for r in reads if r.name in self.nproma_pointers]
+                static_writes = [w for w in writes if w.name in self.nproma_pointers]
 
-            reads = [symbol
-                        for test, symbol in [
-                            self.isNpromaOrFieldAPI(s) 
-                            for s in node.uses_symbols
-                            # Writes take precedence over reads
-                            if s not in node.defines_symbols
-                            ]
-                        if test ]                        
+                reads = [r for r in reads if r not in static_reads]
+                writes = [w for w in writes if w not in static_writes]
 
-            return (reads, writes)
+                return (reads, writes, static_reads, static_writes)
 
         elif isinstance(node, Section):
             # also covers Associate nodes
             # just recurse on the body
 
-            (reads,writes) = self.findAssigns(node.body)
+            (reads,writes, *_) = self.findAssigns(node.body)
 
-            return(reads,writes)
+            return(reads,writes,[], [])
 
 
         elif isinstance(node, Conditional):
 
             # print("conditional : ", node.condition.type.dtype)
 
-            (if_reads, if_writes) = self.findAssigns(node.body)
-            (else_reads, else_writes) = self.findAssigns(node.else_body)
+            (if_reads, if_writes, *_) = self.findAssigns(node.body)
+            (else_reads, else_writes, *_) = self.findAssigns(node.else_body)
 
             all_writes = [w for w in if_writes if w in else_writes]
             all_reads = [r for r in if_reads if r in else_reads]
@@ -213,10 +244,10 @@ class MakeSync(Transformation):
             self.map_reads[node] = all_reads
             self.map_writes[node] = all_writes
             
-            return(all_reads, all_writes)
+            return(all_reads, all_writes, [], [])
         else :
             # print(f' noeud non traité !!!! {type(node)} {hasattr(node,"body")} ' )
-            return([],[])
+            return([], [], [], [])
 
 
     def createSyncCallStatement(self, var, mode):
@@ -268,13 +299,18 @@ class MakeSync(Transformation):
                         print("deleted node from map, this is the way")
 
                 if empty:
-                    self.map_nodes[node] = None
+                    self.map_nodes[node] = ()
+
+                #if self.map_static[node]:
+                for var, rw in self.map_static[node]:
+                     self.map_nodes[node] += (self.createSyncCallStatement(var, rw), )
 
                 return empty
 
 
         elif isinstance(node, Assignment):
-            self.map_nodes[node] = None
+            if not node.ptr :
+                self.map_nodes[node] = None
             return True
         
         elif isinstance(node, Section):
@@ -285,13 +321,13 @@ class MakeSync(Transformation):
             new_writes = [w for w in self.map_writes[node] if w not in upper_writes]
             new_reads = [w for w in self.map_reads[node] if w not in upper_reads and w not in new_writes]
 
-            new_nodes = ()
+            #new_nodes = ()
             if (new_writes != []):
                 print("IF new_writes ", new_writes)
-                new_nodes += Intrinsic(text=f'!IF writes {new_writes}')
+                #new_nodes += (Intrinsic(text=f'!IF writes {new_writes}'),)
             if (new_reads != []):
                 print("IF new_reads ", new_reads)
-                new_nodes += Intrinsic(text=f'!IF reads {new_reads}')
+                #new_nodes += (Intrinsic(text=f'!IF reads {new_reads}'),)
                 
 
             empty_body = self.clearAssigns(node.body, upper_reads + new_reads, upper_writes + new_writes)
@@ -341,9 +377,10 @@ class MakeSync(Transformation):
         # Create the dict of FieldAPI variables used in this routine
         self.fieldAPI_types = retrieve('../../types.dat')
         self.fieldAPI_variables = get_FieldAPI_variables(routine, self.fieldAPI_types)
+        self.nproma_pointers = get_pointers_to_FieldAPI(routine, self.nproma_vars_names)
+        # pointers to nrproma should be treated as nproma variables
+        self.nproma_vars_names += self.nproma_pointers
 
-        
-        # print("nproma vars : ", self.nproma_vars_names)
         # print("FieldAPI variables : ", self.fieldAPI_variables)
 
         
@@ -357,7 +394,7 @@ class MakeSync(Transformation):
         for call in FindNodes(CallStatement).visit(routine.body):
             if call.name != "DR_HOOK":
                 args_to_fAPI = {}
-                print("call found : ", call)
+                #print("call found : ", call)
                 for arg in call.arguments:
                     if isinstance(arg, Scalar):
                         if is_FieldAPI_ARRAY(arg.type.dtype.name):
@@ -416,12 +453,18 @@ class MakeSync(Transformation):
         #                  We might need to implement full expressions replacement
         cond_map={}
         for cond in FindNodes(Conditional).visit(routine.body):
+            # If the condition checks for presence, we should not override it !
+            has_present = False
+            for call in FindInlineCalls().visit(cond.condition):
+                if call.name == 'PRESENT':
+                    has_present = True
             var_map = {}
-            for v in FindVariables().visit(cond.condition):
-                if (v.type.dtype == DerivedType(name="FIELD_BASIC") or 
-                    is_FieldAPI_ARRAY(v.type.dtype.name)):
-                    # print("trouvay ! ", v)
-                    var_map[v] = LogicLiteral(True)
+            if not has_present :
+                for v in FindVariables().visit(cond.condition):
+                    if (v.type.dtype == DerivedType(name="FIELD_BASIC") or 
+                        is_FieldAPI_ARRAY(v.type.dtype.name)):
+                        # print("trouvay ! ", v)
+                        var_map[v] = LogicLiteral(True)
             if var_map:        
                 cond_map[cond] = cond.clone(condition = SubstituteExpressions(var_map).visit(cond.condition))
         routine.body = Transformer(cond_map).visit(routine.body)
@@ -433,7 +476,7 @@ class MakeSync(Transformation):
             # First step : bottom-up traversal of the section
             # This step recursively propagates upwards variables read and writes when they
             # are common to multiple branches in the routine
-            (top_reads, top_writes) = self.findAssigns(routine.body)
+            (top_reads, top_writes, *_) = self.findAssigns(routine.body)
 
         top_reads = [r for r in top_reads if r not in top_writes]
 
