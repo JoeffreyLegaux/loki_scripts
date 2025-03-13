@@ -145,7 +145,9 @@ class MakeSync(Transformation):
                 new_var = Variable(name=var.name, 
                             type=SymbolAttributes(
                                     DerivedType(name='FIELD_BASIC'), 
-                                    intent=var.type.intent, pointer=True, polymorphic=True,
+                                    #intent=var.type.intent,
+                                    intent='in',
+                                    pointer=True, polymorphic=True,
                                     # Local variables point to NULL()
                                     initial=None if var in routine.arguments else InlineCall(DeferredTypeSymbol('NULL'))
                                 ),
