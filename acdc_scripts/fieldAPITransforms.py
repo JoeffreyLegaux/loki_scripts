@@ -60,7 +60,6 @@ class FieldAPIPtr(Transformation):
         
 
     def transform_node(self, node, routine, inplace = False):
-        print("transform node yay")
         fieldAPI_types = retrieve('../../types.dat')
 
         fieldAPI_variables = get_FieldAPI_variables(routine, fieldAPI_types)
