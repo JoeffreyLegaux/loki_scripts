@@ -67,7 +67,8 @@ class ReplaceAbortRegions(Transformation):
         regions_map = {}
         for region in FindNodes(PragmaRegion).visit(routine.body):
             if ('ABORT' in region.pragma.content):
-                regions_map[region] = None if not self.abort_call else \
+                if ('KEEPME' not in region.pragma.content):
+                    regions_map[region] = None if not self.abort_call else \
                                             (CallStatement(name = DeferredTypeSymbol(name='ABOR1'), 
                                                         arguments=(StringLiteral('ERROR : WRONG SETTINGS')), 
                                                         scope=routine), 
