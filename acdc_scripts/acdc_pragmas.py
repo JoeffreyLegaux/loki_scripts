@@ -104,8 +104,8 @@ output_path_scc = output_path
 # Start at CPG_DYN_SLG with empty list of forced transformations
 
 #routines_to_transform = {'CPG_DYN_SLG':{'PARALLEL'},}
-#routines_to_transform = {'VERINT':{'ABORT','SYNC_DEVICE'},}
-routines_to_transform = {'VERINT':{'SYNC_DEVICE'},}
+routines_to_transform = {'VERINT':{'ABORT','SYNC_DEVICE','SCC_DEVICE'},}
+#routines_to_transform = {'VERINT':{'SCC_DEVICE'},}
 #routines_to_transform = {'SIGAM_GP':{'ABORT'},}
 #routines_to_transform = {'LASURE':{'ABORT'},}
 #routines_to_transform = {'GPRCP_EXPL':{'PARALLEL'},}
@@ -146,11 +146,11 @@ while (len(routines_to_transform) > 0):
     for transform in transformations_to_generate:
 
         logical.transform_subroutine(routine, true_symbols, false_symbols) 
-        filename = (source_path + file[:-4]).replace('main', 'local') + 'logical.F90'
-        f = open(filename, 'w')
-        f.write(routine.to_fortran())
-        f.write('\n') #Add eol so vim doesn't complain
-        f.close()
+        #filename = (source_path + file[:-4]).replace('main', 'local') + 'logical.F90'
+        #f = open(filename, 'w')
+        #f.write(routine.to_fortran())
+        #f.write('\n') #Add eol so vim doesn't complain
+        #f.close()
 
         # ========================================
         # Completely useless now ????
