@@ -43,7 +43,7 @@ else:
 
 
 #Importing local transformation classes
-from fieldAPITransforms import FieldAPIPtr
+from fieldAPITransforms import FieldAPIPtr, get_pointers_to_FieldAPI
 from arpege_parameters import params
 from syncTransforms import MakeSync
 from parallelTransforms import MakeParallel
@@ -104,10 +104,11 @@ output_path_scc = output_path
 # Start at CPG_DYN_SLG with empty list of forced transformations
 
 #routines_to_transform = {'CPG_DYN_SLG':{'PARALLEL'},}
+#routines_to_transform = {'LACDYN':{'PARALLEL', 'ABORT'},}
 routines_to_transform = {'VERINT':{'ABORT','SYNC_DEVICE','SCC_DEVICE'},}
 #routines_to_transform = {'VERINT':{'SCC_DEVICE'},}
 #routines_to_transform = {'SIGAM_GP':{'ABORT'},}
-#routines_to_transform = {'LASURE':{'ABORT'},}
+#routines_to_transform = {'LASSIE':{'ABORT','PARALLEL'},}
 #routines_to_transform = {'GPRCP_EXPL':{'PARALLEL'},}
 
 treated_routines = {}
@@ -146,6 +147,8 @@ while (len(routines_to_transform) > 0):
     for transform in transformations_to_generate:
 
         logical.transform_subroutine(routine, true_symbols, false_symbols) 
+        
+        FieldAPI_pointers = get_pointers_to_FieldAPI(routine, params.nproma_aliases)
         #filename = (source_path + file[:-4]).replace('main', 'local') + 'logical.F90'
         #f = open(filename, 'w')
         #f.write(routine.to_fortran())
@@ -262,7 +265,7 @@ while (len(routines_to_transform) > 0):
                 # Resolve associates because variables might be associated to a Field API member and we need to identify them
                 do_resolve_associates(new_routine)
                 # Main transformation : analyse dataflow and insert relevant sync calls
-                new_routine.apply(MakeSync(pointerType='host' if isHost else 'device'))
+                new_routine.apply(MakeSync(pointerType='host' if isHost else 'device', nproma_pointers=FieldAPI_pointers))
 
                 # new_routine.apply(RemoveEmptyConditionals())
 

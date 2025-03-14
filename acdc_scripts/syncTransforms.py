@@ -12,7 +12,7 @@ from storable import retrieve
 
 from arpege_parameters import params
 
-from fieldAPITransforms import is_FieldAPI_ARRAY
+from fieldAPITransforms import is_FieldAPI_ARRAY, get_pointers_to_FieldAPI
 
 import re
 
@@ -42,20 +42,6 @@ def get_FieldAPI_variables(routine, fieldAPI_types):
                 fieldAPI_variables[var.name] = typename
     return fieldAPI_variables
 
-def get_pointers_to_FieldAPI(routine, nproma_variables):
-    #print("nproma variables : ", nproma_variables)
-    ptr_list = []
-    for var in routine.variables :
-        if var.type.pointer and var.type.dtype.name != 'FIELD_BASIC':
-            ptr_list.append(var.name)
-    FieldAPI_ptrs = set()
-    for assign in FindNodes(Assignment).visit(routine.body):
-        if assign.ptr :
-            if assign.lhs.name in ptr_list:                
-                if assign.rhs.name in nproma_variables: 
-                    FieldAPI_ptrs.add(assign.lhs.name)
-    #print("FAPIptrs : ", FieldAPI_ptrs)
-    return FieldAPI_ptrs
 
 def addFieldAPIPointers(routine, number_of_pointers):
     for i in range(number_of_pointers):
@@ -72,7 +58,7 @@ def addFieldAPIPointers(routine, number_of_pointers):
 class MakeSync(Transformation):
 
 
-    def __init__(self, pointerType='host', sections=None, nproma_arrays=None):
+    def __init__(self, pointerType='host', sections=None, nproma_arrays=None, nproma_pointers=None):
         if (pointerType == 'host') :
             self.callSuffix = 'SYNC_HOST'
         elif (pointerType == 'device') :
@@ -85,7 +71,7 @@ class MakeSync(Transformation):
         self.map_static = {}
         self.map_nodes = {}
         self.nproma_vars_names = nproma_arrays if nproma_arrays else []
-        self.nproma_pointers = []
+        self.nproma_pointers = nproma_pointers
         self.sections = sections
         self.total_FAPI_pointers=0
 
@@ -378,10 +364,7 @@ class MakeSync(Transformation):
         # Create the dict of FieldAPI variables used in this routine
         self.fieldAPI_types = retrieve('../../types.dat')
         self.fieldAPI_variables = get_FieldAPI_variables(routine, self.fieldAPI_types)
-        self.nproma_pointers = get_pointers_to_FieldAPI(routine, self.nproma_vars_names)
-        # pointers to nrproma should be treated as nproma variables
-        self.nproma_vars_names += self.nproma_pointers
-
+        self.nproma_vars_names += self.nproma_pointers.keys()
         # print("FieldAPI variables : ", self.fieldAPI_variables)
 
         

@@ -44,6 +44,29 @@ def get_FieldAPI_variables(routine, fieldAPI_types):
     return fieldAPI_variables
 
 
+def get_pointers_to_FieldAPI(routine, nproma_variables):
+    #print("nproma vairiables : ", nproma_variables)
+    ptr_list = []
+    for var in routine.variables :
+        if var.type.pointer and var.type.dtype.name != 'FIELD_BASIC':
+            ptr_list.append(var.name)
+    #print("ptr_list : ", ptr_list)
+    FieldAPI_ptrs = {}
+    for assign in FindNodes(Assignment).visit(routine.body):
+        if assign.ptr :
+            if assign.lhs.name in ptr_list:
+                check = False
+                if is_FieldAPI_ARRAY(assign.rhs.type.dtype.name):
+                    check = True
+                elif assign.rhs.type.shape[0].name in nproma_variables :
+                    check = True
+                
+                if check :
+                    FieldAPI_ptrs[assign.lhs.name] = len(assign.rhs.type.shape)
+    #print("FAPIptrs : ", FieldAPI_ptrs)
+    return FieldAPI_ptrs
+
+
 class FieldAPIPtr(Transformation):
     def __init__(self, pointerType='host', node=None):
         if (pointerType == 'host') :
