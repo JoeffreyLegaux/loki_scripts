@@ -12,42 +12,15 @@ from storable import retrieve
 
 from arpege_parameters import params
 
-from fieldAPITransforms import is_FieldAPI_ARRAY, get_pointers_to_FieldAPI
+from fieldAPITransforms import is_fieldAPI_ARRAY, get_fieldAPI_member, get_fieldAPI_variables, get_pointers_to_FieldAPI
 
 import re
-
-
-
-# extract the fieldAPI member corresponding to a variable represented
-# in the form of a list of its derived members
-def get_fieldAPI_member_lst(var, types):
-    head = var[0]
-
-    if head not in types : return None
-    if len(var) > 1:
-        tail = var[1:]
-        return get_fieldAPI_member_lst(tail, types[head])
-    else :
-        if isinstance(types[head], dict):
-            return None
-        else :
-            return types[head]
-
-def get_FieldAPI_variables(routine, fieldAPI_types):
-    fieldAPI_variables = {}
-    for var in routine.variables :
-        if (isinstance(var.type.dtype, DerivedType)):
-            typename = var.type.dtype.name
-            if typename in fieldAPI_types:
-                fieldAPI_variables[var.name] = typename
-    return fieldAPI_variables
-
 
 def addFieldAPIPointers(routine, number_of_pointers):
     for i in range(number_of_pointers):
         routine.variables += (Variable( name=f'YLFLDPTR{i}', 
                                         type=SymbolAttributes(  DerivedType(name='FIELD_BASIC'),
-                                                                pointer = True, 
+                                                                #pointer = True, 
                                                                 polymorphic=True
                                                                 ),
                                         scope = routine
@@ -57,8 +30,7 @@ def addFieldAPIPointers(routine, number_of_pointers):
 
 class MakeSync(Transformation):
 
-
-    def __init__(self, pointerType='host', sections=None, nproma_arrays=None, nproma_pointers=None):
+    def __init__(self, pointerType='host', sections=None, nproma_arrays=None, nproma_pointers={}):
         if (pointerType == 'host') :
             self.callSuffix = 'SYNC_HOST'
         elif (pointerType == 'device') :
@@ -76,12 +48,12 @@ class MakeSync(Transformation):
         self.total_FAPI_pointers=0
 
 
-    def get_fieldAPI_member(self, var, types):
+    def get_fieldAPI_member(self, var):
         base_name = var.name_parts[0]
         if base_name in self.fieldAPI_variables:
             member_name = var.name_parts[1:]
             member_name = [self.fieldAPI_variables[base_name]] + member_name
-            return get_fieldAPI_member_lst(member_name, self.fieldAPI_types )
+            return get_fieldAPI_member(member_name)
             
         return None
 
@@ -102,7 +74,7 @@ class MakeSync(Transformation):
             # if base_name in self.fieldAPI_variables:
                 # member_name = var.name_parts[1:]
                 # member_name = [self.fieldAPI_variables[base_name]] + member_name
-            fAPI_member = self.get_fieldAPI_member(var, self.fieldAPI_types )
+            fAPI_member = self.get_fieldAPI_member(var)
             if fAPI_member:
                 return True, var.clone(name=fAPI_member[0])
 
@@ -362,8 +334,8 @@ class MakeSync(Transformation):
 
 
         # Create the dict of FieldAPI variables used in this routine
-        self.fieldAPI_types = retrieve('../../types.dat')
-        self.fieldAPI_variables = get_FieldAPI_variables(routine, self.fieldAPI_types)
+        #self.fieldAPI_types = retrieve('../../types.dat')
+        self.fieldAPI_variables = get_fieldAPI_variables(routine)
         self.nproma_vars_names += self.nproma_pointers.keys()
         # print("FieldAPI variables : ", self.fieldAPI_variables)
 
@@ -381,16 +353,16 @@ class MakeSync(Transformation):
                 #print("call found : ", call)
                 for arg in call.arguments:
                     if isinstance(arg, Scalar):
-                        if is_FieldAPI_ARRAY(arg.type.dtype.name):
+                        if is_fieldAPI_ARRAY(arg.type.dtype.name):
                             args_to_fAPI[arg] = Variable(name = "F_P", parent = arg)
                     elif isinstance(arg,  Array):
-                        if is_FieldAPI_ARRAY(arg.type.dtype.name):
+                        if is_fieldAPI_ARRAY(arg.type.dtype.name):
                             args_to_fAPI[arg] = Variable(name = "F_P", parent = arg)
                         elif arg.type.dtype.name != 'FIELD_BASIC' :
                             print('array not FIELD_BASIC or FIELD_nxx_ARRAY passed to subroutine !!!!!', arg, arg.type.dtype.name )
 
                     elif isinstance(arg, DeferredTypeSymbol):
-                        fAPI_member = self.get_fieldAPI_member(arg, self.fieldAPI_types )
+                        fAPI_member = self.get_fieldAPI_member(arg)
                         if fAPI_member :
                             args_to_fAPI[arg] = Variable(name = fAPI_member[0], parent=arg.parent, scope=routine)
                         
@@ -446,8 +418,7 @@ class MakeSync(Transformation):
             if not has_present :
                 for v in FindVariables().visit(cond.condition):
                     if (v.type.dtype == DerivedType(name="FIELD_BASIC") or 
-                        is_FieldAPI_ARRAY(v.type.dtype.name)):
-                        # print("trouvay ! ", v)
+                        is_fieldAPI_ARRAY(v.type.dtype.name)):
                         var_map[v] = LogicLiteral(True)
             if var_map:        
                 cond_map[cond] = cond.clone(condition = SubstituteExpressions(var_map).visit(cond.condition))

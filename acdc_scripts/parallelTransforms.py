@@ -64,7 +64,8 @@ class FindNodesOutsidePragmaRegion(FindNodes):
 
 
 class MakeParallel(Transformation):
-    def __init__(self):        
+    def __init__(self,  FieldAPI_pointers={}):        
+        self.FieldAPI_pointers = FieldAPI_pointers
         self.block_symbol = DeferredTypeSymbol( name=params.block_dimension, 
                                                 parent = DeferredTypeSymbol(name=params.cpg_opts_variable))
         
@@ -447,7 +448,7 @@ class MakeParallel(Transformation):
             true_symbols, false_symbols=logical_lst.symbols()
             false_symbols.append('LHOOK')
 
-            scc_transform_routine(new_subroutine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols)
+            scc_transform_routine(new_subroutine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols, FieldAPI_pointers=self.FieldAPI_pointers)
 
         new_subroutine.apply(RemoveComments())
         new_subroutine.apply(RemovePragmas())

@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from storable import retrieve
+
 @dataclass
 class params_class:
   nproma_aliases = ["KLON","YDCPG_OPTS%KLON","YDGEOMETRY%YRDIM%NPROMNH","YDGEOMETRY%YRDIM%NPROMA","KPROMA", "YDDIM%NPROMA", "NPROMA"]
@@ -19,7 +21,8 @@ class params_class:
                         'LAVENT':'main/arpifs/adiab/lavent.F90',
                         'LASSIE':'main/arpifs/adiab/lassie.F90',
                         'LASURE':'main/arpifs/adiab/lasure.F90',
-                        'GPRCP_EXPL':'main/.fypp/arpifs/adiab/gprcp_expl.F90',
+                        #'GPRCP_EXPL':'main/.fypp/arpifs/adiab/gprcp_expl.F90',
+                        'GPRCP_EXPL':'local/.fypp/arpifs/adiab/gprcp_expl.F90',
                         'SIGAM_GP':'main/.fypp/arpifs/adiab/sigam_gp.F90',
                         'SITNU_GP':'main/.fypp/arpifs/adiab/sitnu_gp.F90',
                         'LAVABO_EXPL_LAITVSPCQM_PART1':'main/arpifs/adiab/lavabo_expl_laitvspcqm_part1.F90',
@@ -27,10 +30,13 @@ class params_class:
                         'LATTEX_EXPL_2TL':'main/arpifs/adiab/lattex_expl_2tl.F90',
                         'LATTEX_EXPL_VSPLTRANS':'main/arpifs/adiab/lattex_expl_vspltrans.F90',
                         'VERDISINT':'main/arpifs/utility/verdisint.F90',
-                        'VERINT':'main/arpifs/utility/verint.F90',
+                        #'VERINT':'main/arpifs/utility/verint.F90',
+                        'VERINT':'local/arpifs/utility/verint.F90',
                         'VERINTS':'main/arpifs/utility/verints.F90',
 
                         'VERDER':'main/arpifs/utility/verder.F90'
                         }
+  
+  fieldAPI_types = retrieve('../../types.dat')
 
 params = params_class()

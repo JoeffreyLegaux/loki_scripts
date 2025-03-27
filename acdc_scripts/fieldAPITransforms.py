@@ -15,13 +15,18 @@ import re
 
 from arpege_parameters import params
 
-def is_FieldAPI_ARRAY(typename):
+
+def is_fieldAPI_ARRAY(typename):
     return (re.search("^FIELD_\d(IM|LM|RD|RM|RB)_ARRAY$", typename) != None)
 
-def get_fieldAPI_member(var, types):
-    head = var[0]
 
+# extract the fieldAPI member corresponding to a variable represented
+# in the form of a list of its derived members
+def get_fieldAPI_member(var):
+    head = var[0]
+    types = params.fieldAPI_types
     if head not in types : return None
+    rint("fieldAPI typez ? ", params.fieldAPI_types)
     if len(var) > 1:
         tail = var[1:]
         return get_fieldAPI_member(tail, types[head])
@@ -31,15 +36,15 @@ def get_fieldAPI_member(var, types):
         else :
             return types[head]
 
-def get_FieldAPI_variables(routine, fieldAPI_types):
+def get_fieldAPI_variables(routine):
     fieldAPI_variables = {}
     for var in routine.variables :
         if (isinstance(var.type.dtype, DerivedType)):
             typename = var.type.dtype.name
             # Variables of type ARRAY_nD are automatically generated FieldAPI   
-            if is_FieldAPI_ARRAY(typename) :
+            if is_fieldAPI_ARRAY(typename) :
                 fieldAPI_variables[var.name] = typename
-            elif typename in fieldAPI_types:
+            elif typename in params.fieldAPI_types:
                 fieldAPI_variables[var.name] = typename
     return fieldAPI_variables
 
@@ -55,14 +60,20 @@ def get_pointers_to_FieldAPI(routine, nproma_variables):
     for assign in FindNodes(Assignment).visit(routine.body):
         if assign.ptr :
             if assign.lhs.name in ptr_list:
-                check = False
-                if is_FieldAPI_ARRAY(assign.rhs.type.dtype.name):
-                    check = True
-                elif assign.rhs.type.shape[0].name in nproma_variables :
-                    check = True
+                # only treat direct assignment to arrays variables
+                # Esp. avoid binding to NULL()
+                #print("rhs ? ", assign.rhs, type(assign.rhs)) 
+                if isinstance(assign.rhs, Array):
+                    check = False
+                    print("assing.rhs : ", assign.rhs)
+                    print("tpye ? shape ! ", assign.rhs.type.shape)
+                    if is_fieldAPI_ARRAY(assign.rhs.type.dtype.name):
+                        check = True
+                    elif assign.rhs.type.shape[0].name in nproma_variables :
+                        check = True
                 
-                if check :
-                    FieldAPI_ptrs[assign.lhs.name] = len(assign.rhs.type.shape)
+                    if check :
+                        FieldAPI_ptrs[assign.lhs.name] = len(assign.rhs.type.shape)
     #print("FAPIptrs : ", FieldAPI_ptrs)
     return FieldAPI_ptrs
 
@@ -83,9 +94,7 @@ class FieldAPIPtr(Transformation):
         
 
     def transform_node(self, node, routine, inplace = False):
-        fieldAPI_types = retrieve('../../types.dat')
-
-        fieldAPI_variables = get_FieldAPI_variables(routine, fieldAPI_types)
+        fieldAPI_variables = get_fieldAPI_variables(routine)
 
         variables_map = {}
 

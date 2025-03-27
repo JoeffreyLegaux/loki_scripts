@@ -104,9 +104,9 @@ output_path_scc = output_path
 # Start at CPG_DYN_SLG with empty list of forced transformations
 
 #routines_to_transform = {'CPG_DYN_SLG':{'PARALLEL'},}
-#routines_to_transform = {'LACDYN':{'PARALLEL', 'ABORT'},}
+#routines_to_transform = {'LACDYN':{'PARALLEL', },}  # 'ABORT'},}
 routines_to_transform = {'VERINT':{'ABORT','SYNC_DEVICE','SCC_DEVICE'},}
-#routines_to_transform = {'VERINT':{'SCC_DEVICE'},}
+#routines_to_transform = {'VERDISINT':{'SCC_DEVICE'},}
 #routines_to_transform = {'SIGAM_GP':{'ABORT'},}
 #routines_to_transform = {'LASSIE':{'ABORT','PARALLEL'},}
 #routines_to_transform = {'GPRCP_EXPL':{'PARALLEL'},}
@@ -149,11 +149,9 @@ while (len(routines_to_transform) > 0):
         logical.transform_subroutine(routine, true_symbols, false_symbols) 
         
         FieldAPI_pointers = get_pointers_to_FieldAPI(routine, params.nproma_aliases)
-        #filename = (source_path + file[:-4]).replace('main', 'local') + 'logical.F90'
-        #f = open(filename, 'w')
-        #f.write(routine.to_fortran())
-        #f.write('\n') #Add eol so vim doesn't complain
-        #f.close()
+
+        #print("FieldAPI_pointers found in acdc_pragmes : ", FieldAPI_pointers)
+       
 
         # ========================================
         # Completely useless now ????
@@ -207,13 +205,13 @@ while (len(routines_to_transform) > 0):
                     false_symbols.append('LHOOK')
                     
                     with Timer(logger=acdc_logger, text='[ACDC] scc_transform_routine in {:.2f}s'):
-                        scc_transform_routine(new_routine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols)
+                        scc_transform_routine(new_routine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols, FieldAPI_pointers=FieldAPI_pointers)
                     
                     with Timer(logger=acdc_logger, text='[ACDC] FieldAPIPtr transform in {:.2f}s'):
                         new_routine.apply(FieldAPIPtr(pointerType='host' if isHost else 'device'))
 
                     # Change called subroutines names, import their interface and add !$acc routine directives if relevant
-                    add_suffix_transform =(AddSuffixToCalls(suffix=transform, additional_variables=['YLSTACK']))
+                    add_suffix_transform =(AddSuffixToCalls(suffix='_'+transform, additional_variables=['YLSTACK']))
                     new_routine.apply(add_suffix_transform)
                     for subroutine in add_suffix_transform.routines_called:
                         add_to_transforms(subroutine, {transform})
@@ -223,7 +221,7 @@ while (len(routines_to_transform) > 0):
                         new_routine.apply(AddACCRoutineDirectives())
 
                     # Add suffix and generate interface file
-                    transfodep = DependencyTransformation(suffix=transform,  include_path='./')
+                    transfodep = DependencyTransformation(suffix='_'+transform,  include_path='./')
                     new_routine.apply(transfodep, role='kernel')
 
                     # Turn local arrays into cray pointers on the stack through "alloc" and "temp" macros
@@ -341,7 +339,7 @@ while (len(routines_to_transform) > 0):
 
                 new_routine.apply(ReplaceAbortRegions())
 
-                parallel_transform = MakeParallel() 
+                parallel_transform = MakeParallel(FieldAPI_pointers) 
                 new_routine.apply(parallel_transform)
                 print("routine parallele : ", parallel_transform.subroutines_to_transform)
                 # We probably will have for new routines 'PARALLEL' 'SYNC' and 'ABORT' transforms to add
