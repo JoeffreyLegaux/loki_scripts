@@ -1,7 +1,7 @@
 from loki import (Frontend, Sourcefile, FindNodes, Loop, Node, Intrinsic, Subroutine, Transformer, NestedTransformer, 
     PragmaRegion, DerivedType, Transformation, CallStatement, SymbolAttributes, BasicType, FindTypedSymbols, FindVariables, SubstituteExpressions )
 
-from loki.ir import Section, Comment, CommentBlock, VariableDeclaration, Pragma, PragmaRegion, Import, Assignment, Conditional, LeafNode, InternalNode, Associate, pprint
+from loki.ir import Section, Comment, CommentBlock, VariableDeclaration, Pragma, PragmaRegion, Import, Assignment, Conditional, LeafNode, InternalNode, Associate
 
 from loki.transformations import inline_member_procedures
 
@@ -67,13 +67,16 @@ class ReplaceAbortRegions(Transformation):
         regions_map = {}
         for region in FindNodes(PragmaRegion).visit(routine.body):
             if ('ABORT' in region.pragma.content):
-                if ('KEEPME' not in region.pragma.content):
-                    regions_map[region] = None if not self.abort_call else \
-                                            (CallStatement(name = DeferredTypeSymbol(name='ABOR1'), 
+                # If abort_call is set to false, we will blindly erase the region
+                if not self.abort_call :
+                    regions_map[region] = None
+                # If the ABORT directive has a KEEPME clause, we keep itscontent
+                elif ('KEEPME' not in region.pragma.content):
+                    # Otherwise, we replace the region with an ABOR1 call
+                    regions_map[region] = (CallStatement(name = DeferredTypeSymbol(name='ABOR1'), 
                                                         arguments=(StringLiteral('ERROR : WRONG SETTINGS')), 
                                                         scope=routine), 
                                            )
-
 
         routine.body = Transformer(regions_map).visit(routine.body)
 
