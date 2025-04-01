@@ -98,15 +98,19 @@ acdc_logger = info # perf pour log fichier
 #source_path = '../../loki_WIP/src/local/'
 source_path = '../../loki_WIP/src/'
 
+#output_path = source_path + '/local/'
+output_path = source_path + 'local/'
 
-output_path = source_path + '/local/'
-output_path_scc = output_path
+
+output_path_sources = output_path + 'ifsaux/loki_sources/'
+output_path_interfaces = output_path + 'ifsaux/loki_interfaces/'
+
 # Start at CPG_DYN_SLG with empty list of forced transformations
 
 #routines_to_transform = {'CPG_DYN_SLG':{'PARALLEL'},}
 #routines_to_transform = {'LACDYN':{'PARALLEL', },}  # 'ABORT'},}
-routines_to_transform = {'VERINT':{'ABORT','SYNC_DEVICE','SCC_DEVICE'},}
-#routines_to_transform = {'VERDISINT':{'SCC_DEVICE'},}
+#routines_to_transform = {'VERINT':{'ABORT','SYNC_DEVICE','SCC_DEVICE'},}
+routines_to_transform = {'VERDER':{'SCC_DEVICE'},}
 #routines_to_transform = {'SIGAM_GP':{'ABORT'},}
 #routines_to_transform = {'LASSIE':{'ABORT','PARALLEL'},}
 #routines_to_transform = {'GPRCP_EXPL':{'PARALLEL'},}
@@ -129,8 +133,8 @@ while (len(routines_to_transform) > 0):
         exit(0)
     else:
         file = params.routines_to_files[routine]
-    
-    print("file : ", file)
+
+    file_without_path = file.split('/')[-1:][0]
 
     source = Sourcefile.from_file(source_path+file, frontend=Frontend.FP)
 
@@ -190,7 +194,9 @@ while (len(routines_to_transform) > 0):
                 isHost = (transform == 'SCC_HOST')
                 # suffix='_SINGLE_COLUMN_FIELD_API_' + ('HOST' if isHost else 'DEVICE')
                 #filename = output_path + file[:-4] + '_scc' + ('_host.F90' if isHost else '_device.F90')
-                filename = (source_path + file[:-4]).replace('main', 'local') + '_scc' + ('_host.F90' if isHost else '_device.F90')
+
+                #filename = (source_path + file[:-4]).replace('main', 'local') + '_scc' + ('_host.F90' if isHost else '_device.F90')
+                filename = output_path_sources + file_without_path[:-4] + '_scc' + ('_host.F90' if isHost else '_device.F90')
                 f = open(filename, 'w')
                 for routine in routines:
 
@@ -221,7 +227,7 @@ while (len(routines_to_transform) > 0):
                         new_routine.apply(AddACCRoutineDirectives())
 
                     # Add suffix and generate interface file
-                    transfodep = DependencyTransformation(suffix='_'+transform,  include_path='./')
+                    transfodep = DependencyTransformation(suffix='_'+transform,  include_path=output_path_interfaces)
                     new_routine.apply(transfodep, role='kernel')
 
                     # Turn local arrays into cray pointers on the stack through "alloc" and "temp" macros
@@ -240,7 +246,7 @@ while (len(routines_to_transform) > 0):
             print("====_____________================______________================______________=================")
             isHost = (transform == 'SYNC_HOST')
             #filename = output_path + file[:-4] + ('_sync_host.F90' if isHost else '_sync_device.F90')
-            filename = (source_path + file[:-4]).replace('main', 'local') + ('_sync_host.F90' if isHost else '_sync_device.F90')
+            filename = output_path_sources + file_without_path[:-4] + ('_sync_host.F90' if isHost else '_sync_device.F90')
              
             f = open(filename, 'w')
             for routine in routines:
@@ -270,7 +276,7 @@ while (len(routines_to_transform) > 0):
                 # Add suffix and generate interface file
                 transfodep = DependencyTransformation(suffix='_SYNC_HOST' if isHost else '_SYNC_DEVICE',
                                                          # mode='strict' , 
-                                                         include_path='./')
+                                                         include_path=output_path_interfaces)
                 new_routine.apply(transfodep, role='kernel')
                 
                 print("writing to file : ", filename)
@@ -287,7 +293,7 @@ while (len(routines_to_transform) > 0):
             print("====_____________================______________================______________=================")
             #filename = output_path + file[:-4] + '_abort.F90'
             print("source path ", source_path)
-            filename = (source_path + file[:-4]).replace('main', 'local') + '_abort.F90'
+            filename = output_path_sources + file_without_path[:-4] + '_abort.F90'
             print("ouput file opened : ", filename)
             f = open(filename, 'w')
             for routine in routines:
@@ -310,7 +316,7 @@ while (len(routines_to_transform) > 0):
                     add_to_transforms(subroutine, {'ABORT'})
 
 
-                transfodep = DependencyTransformation(suffix='_ABORT', include_path='./')
+                transfodep = DependencyTransformation(suffix='_ABORT', include_path=output_path_interfaces)
                 new_routine.apply(transfodep, role='kernel')
                 
                 print("writing to file : ", filename)
@@ -326,7 +332,7 @@ while (len(routines_to_transform) > 0):
             print(f'call {transform} ')
             print("====_____________================______________================______________=================")
             #filename = output_path + file[:-4] + '_parallel.F90'
-            filename = (source_path + file[:-4]).replace('main', 'local') + '_parallel.F90'
+            filename = output_path_sources + file_without_path[:-4] + '_parallel.F90'
             print("ouput file opened : ", filename)
             f = open(filename, 'w')
             for routine in routines:
@@ -348,7 +354,7 @@ while (len(routines_to_transform) > 0):
                     
                 new_routine.apply(RemovePragmaRegions())
 
-                transfodep = DependencyTransformation(suffix='_PARALLEL', include_path='./')
+                transfodep = DependencyTransformation(suffix='_PARALLEL', include_path=output_path_interfaces)
                 new_routine.apply(transfodep, role='kernel')
                 
                 print("writing to file : ", filename)
