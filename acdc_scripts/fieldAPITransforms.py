@@ -22,11 +22,12 @@ def is_fieldAPI_ARRAY(typename):
 
 # extract the fieldAPI member corresponding to a variable represented
 # in the form of a list of its derived members
-def get_fieldAPI_member(var):
+def get_fieldAPI_member(var, types = None):
     head = var[0]
-    types = params.fieldAPI_types
+    # Bootstrap recursion with complete FieldAPI types dict
+    if not types:
+        types = params.fieldAPI_types
     if head not in types : return None
-    rint("fieldAPI typez ? ", params.fieldAPI_types)
     if len(var) > 1:
         tail = var[1:]
         return get_fieldAPI_member(tail, types[head])
@@ -57,6 +58,8 @@ def get_pointers_to_FieldAPI(routine, nproma_variables):
             ptr_list.append(var.name)
     #print("ptr_list : ", ptr_list)
     FieldAPI_ptrs = {}
+    # probably won't encounter pointers to defferedtype so don't initlialize those
+    fieldAPI_variables = None
     for assign in FindNodes(Assignment).visit(routine.body):
         if assign.ptr :
             if assign.lhs.name in ptr_list:
@@ -65,15 +68,33 @@ def get_pointers_to_FieldAPI(routine, nproma_variables):
                 #print("rhs ? ", assign.rhs, type(assign.rhs)) 
                 if isinstance(assign.rhs, Array):
                     check = False
-                    print("assing.rhs : ", assign.rhs)
-                    print("tpye ? shape ! ", assign.rhs.type.shape)
                     if is_fieldAPI_ARRAY(assign.rhs.type.dtype.name):
                         check = True
-                    elif assign.rhs.type.shape[0].name in nproma_variables :
-                        check = True
-                
+                        dims = int(assign.rhs.type.dtype.name[6])
+                    elif assign.rhs.type.shape:
+                        # Array with shape is plain old array, check if nproma size
+                        if assign.rhs.type.shape[0].name in nproma_variables :
+                            check = True
+                            dims = len(assign.rhs.type.shape)
+                    else:
+                        # Array with no shape means deferredtype, it could be fieldapi !
+                        base = assign.rhs.name_parts[0]                        
+                        if not fieldAPI_variables:
+                            fieldAPI_variables = get_fieldAPI_variables(routine)
+                        #print("FieldAPI vars : ", fieldAPI_variables)
+                        if base in fieldAPI_variables:
+                            fAPI_base = fieldAPI_variables[base]
+                            #Build the corresponding FieldAPI variable name
+                            member = var.name_parts[1:]
+                            member = [fAPI_base] + member
+                            fAPI_member = get_fieldAPI_member(member)
+                            if fAPI_member:
+                                check = True
+                                dims = fAPI_member[1]
+
+
                     if check :
-                        FieldAPI_ptrs[assign.lhs.name] = len(assign.rhs.type.shape)
+                        FieldAPI_ptrs[assign.lhs.name] = dims
     #print("FAPIptrs : ", FieldAPI_ptrs)
     return FieldAPI_ptrs
 
@@ -111,7 +132,7 @@ class FieldAPIPtr(Transformation):
 
                 fAPI_base = fieldAPI_variables[base]
                 # Specific treatment for ARRAY_nD variables
-                if is_FieldAPI_ARRAY(fAPI_base):
+                if is_fieldAPI_ARRAY(fAPI_base):
                     ndim = int(fAPI_base[6])
 
                     if hasattr(var, "dimensions") and var.dimensions :
@@ -130,7 +151,7 @@ class FieldAPIPtr(Transformation):
                     #Build the corresponding FieldAPI variable name
                     member = var.name_parts[1:]
                     member = [fAPI_base] + member
-                    fAPI_member = get_fieldAPI_member(member, fieldAPI_types )
+                    fAPI_member = get_fieldAPI_member(member)
                     
                     if fAPI_member:                    
                         if isinstance(var, Array):
