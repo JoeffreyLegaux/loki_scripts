@@ -249,10 +249,10 @@ class MakeParallel(Transformation):
         #    routine.spec.prepend(Import(module=f'UTIL_ARRAY_{type_dim}D_MOD'))
 
         # We will very likely need to declare FIELD_BASIC variables
-        #routine.spec.prepend(Import(module="FIELD_MODULE", symbols=(DeferredTypeSymbol(name='FIELD_BASIC'),)))
+        routine.spec.prepend(Import(module="FIELD_BASIC_MODULE", symbols=(DeferredTypeSymbol(name='FIELD_BASIC'),)))
 
         routine.spec.prepend(Import(module="YOMPARALLELMETHOD"))
-        routine.spec.prepend(Import(module="FIELD_BASIC_MODULE"))
+        routine.spec.prepend(Import(module="FIELD_ARRAY_MODULE"))
 
         return ([nproma_names_map[var] for var in nproma_names_map], locals_dimensions)
 
