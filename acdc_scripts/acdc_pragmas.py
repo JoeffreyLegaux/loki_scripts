@@ -21,7 +21,7 @@ import sys, traceback
 sys.path.append('/home/ext/cf/ccom/legauxj/gpupack/build_scc/transformation/')
 
 try :
-    from openacc_transform import scc_transform_routine , alloc_temp
+    from openacc_transform import scc_transform_routine, alloc_temp, assoc_alloc_pt
 except ImportError as error:
     print (colored("build_scc : scc_transform_routine not imported, check sys.path !", "red"))
     print("Error message : ", error)
@@ -54,19 +54,21 @@ from commonTransforms import (RemovePragmas, RemovePragmaRegions, RemoveAssignme
 
 
 def add_to_transforms(routine, transformations):
+    global treated_routines, routines_to_transform
     if routine in treated_routines:
         transformations = {trans for trans in transformation if trans not in treated_routines[routine]}
 
     if routine not in routines_to_transform:
         routines_to_transform[routine] = transformations
     else:
-        routines_to_transform[routine].union(transformations)
+        routines_to_transform[routine] = routines_to_transform[routine].union(transformations)
 
 def add_to_treated(routine, transformations):
+    global treated_routines
     if routine not in treated_routines:
         treated_routines[routine] = transformations
     else:
-        treated_routines[routine].union(transformations)
+        treated_routines[routine] = treated_routines[routine].union(transformations)
 
     
 
@@ -110,9 +112,9 @@ output_path_interfaces = output_path + 'ifsaux/loki_interfaces/'
 #routines_to_transform = {'CPG_DYN_SLG':{'PARALLEL'},}
 #routines_to_transform = {'LACDYN':{'PARALLEL', },}  # 'ABORT'},}
 #routines_to_transform = {'VERINT':{'ABORT','SYNC_DEVICE','SCC_DEVICE'},}
-routines_to_transform = {'VERDER':{'SCC_DEVICE'},}
+#routines_to_transform = {'VERDISINT':{'SYNC_DEVICE'},}
 #routines_to_transform = {'SIGAM_GP':{'ABORT'},}
-#routines_to_transform = {'LASSIE':{'ABORT','PARALLEL'},}
+routines_to_transform = {'LASSIE':{'ABORT','PARALLEL'},}
 #routines_to_transform = {'GPRCP_EXPL':{'PARALLEL'},}
 
 treated_routines = {}
@@ -127,7 +129,7 @@ while (len(routines_to_transform) > 0):
     # Remove routine from the list. If new transformations arise, treat them in the next pass
     routines_to_transform.pop(routine)
     print("tranforms to generate : ", transformations_to_generate) 
-    
+    print("treated routines : ", treated_routines)    
     if routine not in params.routines_to_files:
         print(f'ERROR : routine {routine} not found in files list !!!')
         exit(0)
@@ -152,9 +154,9 @@ while (len(routines_to_transform) > 0):
 
         logical.transform_subroutine(routine, true_symbols, false_symbols) 
         
-        FieldAPI_pointers = get_pointers_to_FieldAPI(routine, params.nproma_aliases)
+        (FieldAPI_pointers, FieldAPI_pointers_names) = get_pointers_to_FieldAPI(routine, params.nproma_aliases)
 
-        #print("FieldAPI_pointers found in acdc_pragmes : ", FieldAPI_pointers)
+        print("FieldAPI_pointers found in acdc_pragmes : ", FieldAPI_pointers, type(FieldAPI_pointers))
        
 
         # ========================================
@@ -217,7 +219,7 @@ while (len(routines_to_transform) > 0):
                         new_routine.apply(FieldAPIPtr(pointerType='host' if isHost else 'device'))
 
                     # Change called subroutines names, import their interface and add !$acc routine directives if relevant
-                    add_suffix_transform =(AddSuffixToCalls(suffix='_'+transform, additional_variables=['YLSTACK']))
+                    add_suffix_transform =(AddSuffixToCalls(suffix='_'+transform, additional_kwvariables=[('YDSTACK','YLSTACK')]))
                     new_routine.apply(add_suffix_transform)
                     for subroutine in add_suffix_transform.routines_called:
                         add_to_transforms(subroutine, {transform})
@@ -232,7 +234,7 @@ while (len(routines_to_transform) > 0):
 
                     # Turn local arrays into cray pointers on the stack through "alloc" and "temp" macros
                     alloc_temp(new_routine)
-
+                    assoc_alloc_pt(new_routine, FieldAPI_pointers_names)
                 
                     print("writing to file : ", filename)
                     f.write(new_routine.to_fortran())
@@ -349,8 +351,11 @@ while (len(routines_to_transform) > 0):
                 new_routine.apply(parallel_transform)
                 print("routine parallele : ", parallel_transform.subroutines_to_transform)
                 # We probably will have for new routines 'PARALLEL' 'SYNC' and 'ABORT' transforms to add
+                print("treated routines : ", treated_routines)
                 for subroutine in parallel_transform.subroutines_to_transform:
                     add_to_transforms(subroutine, parallel_transform.subroutines_to_transform[subroutine])
+                    print("added transfo ", subroutine, parallel_transform.subroutines_to_transform[subroutine])
+                print("routines to trasnsform ? ", routines_to_transform)
                     
                 new_routine.apply(RemovePragmaRegions())
 

@@ -104,7 +104,9 @@ class MakeSync(Transformation):
                             type=SymbolAttributes(
                                     DerivedType(name='FIELD_BASIC'), 
                                     intent='in' if var in routine.arguments else None,
+                                    #intent=None,
                                     pointer=True, polymorphic=True,
+                                    optional=var.type.optional,
                                     # Local variables point to NULL()
                                     initial=None if var in routine.arguments else InlineCall(DeferredTypeSymbol('NULL'))
                                 ),
@@ -313,10 +315,11 @@ class MakeSync(Transformation):
     def transform_subroutine(self, routine, **kwargs):
 
         # We will very likely transform some variables into FIELD_BASIC
-        routine.spec.prepend(Import(module="FIELD_MODULE", symbols=(DeferredTypeSymbol(name='FIELD_BASIC'),)))
+        #routine.spec.prepend(Import(module="FIELD_MODULE", symbols=(DeferredTypeSymbol(name='FIELD_BASIC'),)))
+        routine.spec.prepend(Import(module="FIELD_BASIC_MODULE", symbols=(DeferredTypeSymbol(name='FIELD_BASIC'),)))
 
 
-        # If there are no sections, we are treating a whole routine (GENERATE directive)
+        # If there are no sections, we are treating a whole routine
         # The main routine has turned its NPROMA local/arguments arrays into FieldAPI pointers
         # Therefore these array become pointers in the SYNC routine
         if not self.sections: 
@@ -327,18 +330,16 @@ class MakeSync(Transformation):
                         firstdim = firstdim.upper
                     if firstdim in params.nproma_aliases:
                         self.nproma_vars_names.append(var.name)
+            for ptr in self.nproma_pointers.keys() :
+                self.nproma_vars_names.append(ptr)
             self.nproma_vars_names = self.declarationsToPointers(routine, self.nproma_vars_names)
         # Otherwise, we do nothing as the parallel transforms provided at construction the 
-        # transformed names of nproma variables
-
+        # transformed names of nproma variables, only add the FieldAPI pointers to the list
+        self.nproma_vars_names += self.nproma_pointers.keys()
 
 
         # Create the dict of FieldAPI variables used in this routine
-        #self.fieldAPI_types = retrieve('../../types.dat')
         self.fieldAPI_variables = get_fieldAPI_variables(routine)
-        self.nproma_vars_names += self.nproma_pointers.keys()
-        # print("FieldAPI variables : ", self.fieldAPI_variables)
-
         
         # Subroutines called inside a SYNC routine will only accept FIELD_BASIC arguments for FieldAPI variables.
         # We find those calls and swap FieldAPI arguments with a generic FIELD_BASIC pointer.
@@ -350,6 +351,7 @@ class MakeSync(Transformation):
         for call in FindNodes(CallStatement).visit(routine.body):
             if call.name != "DR_HOOK":
                 args_to_fAPI = {}
+                args_to_pointers = {}
                 #print("call found : ", call)
                 for arg in call.arguments:
                     if isinstance(arg, Scalar):
@@ -358,6 +360,10 @@ class MakeSync(Transformation):
                     elif isinstance(arg,  Array):
                         if is_fieldAPI_ARRAY(arg.type.dtype.name):
                             args_to_fAPI[arg] = Variable(name = "F_P", parent = arg)
+                        elif arg.type.dtype.name == 'FIELD_BASIC' :
+                            print("Field basinc found tavu : ", arg)
+                            args_to_pointers[arg] = arg.clone(dimensions= None)
+                            print("args_tp_ptre : ", args_to_pointers[arg] )
                         elif arg.type.dtype.name != 'FIELD_BASIC' :
                             print('array not FIELD_BASIC or FIELD_nxx_ARRAY passed to subroutine !!!!!', arg, arg.type.dtype.name )
 
@@ -366,10 +372,9 @@ class MakeSync(Transformation):
                         if fAPI_member :
                             args_to_fAPI[arg] = Variable(name = fAPI_member[0], parent=arg.parent, scope=routine)
                         
-                if args_to_fAPI :
+                if args_to_fAPI or args_to_pointers :
                     assignments = []
                     count = 0
-                    args_to_pointers={}
                     for arg in args_to_fAPI:
                         args_to_pointers[arg] = Variable(name=f'YLFLDPTR{count}', scope=routine)
                         assignments.append(Assignment(  lhs = args_to_pointers[arg], 

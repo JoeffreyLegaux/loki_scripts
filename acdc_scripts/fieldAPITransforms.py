@@ -57,7 +57,8 @@ def get_pointers_to_FieldAPI(routine, nproma_variables):
         if var.type.pointer and var.type.dtype.name != 'FIELD_BASIC':
             ptr_list.append(var.name)
     #print("ptr_list : ", ptr_list)
-    FieldAPI_ptrs = {}
+    FieldAPI_ptrs_dims = {}
+    FieldAPI_ptrs_vars = {}
     # probably won't encounter pointers to defferedtype so don't initlialize those
     fieldAPI_variables = None
     for assign in FindNodes(Assignment).visit(routine.body):
@@ -94,9 +95,10 @@ def get_pointers_to_FieldAPI(routine, nproma_variables):
 
 
                     if check :
-                        FieldAPI_ptrs[assign.lhs.name] = dims
+                        FieldAPI_ptrs_dims[assign.lhs.name] = dims
+                        FieldAPI_ptrs_vars[assign.lhs.name] = assign.rhs
     #print("FAPIptrs : ", FieldAPI_ptrs)
-    return FieldAPI_ptrs
+    return (FieldAPI_ptrs_dims, FieldAPI_ptrs_vars)
 
 
 class FieldAPIPtr(Transformation):
