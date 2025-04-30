@@ -90,9 +90,10 @@ class RemoveAssignments(Transformation):
  
 
 class AddSuffixToCalls(Transformation):
-    def __init__(self, suffix, additional_variables = [], custom_visitor = None):
+    def __init__(self, suffix, additional_variables = [], additional_kwvariables = [], custom_visitor = None):
         self.suffix = suffix
         self.additional_variables = additional_variables
+        self.additional_kwvariables = additional_kwvariables
         self.custom_visitor = custom_visitor
         self.routines_called = set()
  
@@ -117,13 +118,19 @@ class AddSuffixToCalls(Transformation):
                 elif call.name not in containedNames:
                     print("call foudn ", call.name)
                     new_args = call.arguments
+                    new_kwargs = call.kwarguments
 
                     for var in self.additional_variables:
                         new_args += (Variable(name=var),)
+                    for var_couple in self.additional_kwvariables:
+                        new_kwargs += ((var_couple[0],Variable(name=var_couple[1])),)
+
+                    #print("call kwargs : ", call.kwarguments)
 
                     new_call_name = call.name.name + self.suffix
                     self.routines_called.add(call.name.name) 
-                    call_map[call] = call.clone(name=DeferredTypeSymbol(name=new_call_name), arguments = new_args)
+                    call_map[call] = call.clone(name=DeferredTypeSymbol(name=new_call_name), 
+                                        arguments = new_args, kwarguments = new_kwargs)
                     calls_names.add(new_call_name.lower())
 
         # Update includes : check if they are not already imported
@@ -246,6 +253,9 @@ class RemoveComments(Transformation):
         for comment in FindNodes((Comment, CommentBlock)).visit(routine.spec):
             comments_map[comment] = None
         routine.spec = Transformer(comments_map).visit(routine.spec)
+        # Remove comments starting before the first actual declaration
+        routine.docstring = None
+
 
 
 class RemoveLoops(Transformation):
