@@ -20,7 +20,7 @@ def addFieldAPIPointers(routine, number_of_pointers):
     for i in range(number_of_pointers):
         routine.variables += (Variable( name=f'YLFLDPTR{i}', 
                                         type=SymbolAttributes(  DerivedType(name='FIELD_BASIC'),
-                                                                #pointer = True, 
+                                                                pointer = True, 
                                                                 polymorphic=True
                                                                 ),
                                         scope = routine
