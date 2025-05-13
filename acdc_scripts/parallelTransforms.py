@@ -299,7 +299,7 @@ class MakeParallel(Transformation):
     def makeOpenACCSCCLoop(self, routine, boundary_variable, region):
 
         loop_pragma = Pragma(   keyword="ACC", 
-                                    content = "PARALLEL LOOP GANG FIRSTPRIVATE ("+ boundary_variable.name +") PRIVATE (IBL)"
+                                    content = "PARALLEL LOOP GANG FIRSTPRIVATE ("+ boundary_variable.name +") PRIVATE (" + params.block_counter + ")"
                             )
 
         columns_loop = self.makeColumnsLoop(routine, boundary_variable, region, 'OpenACC')              
@@ -332,28 +332,29 @@ class MakeParallel(Transformation):
         #assignments += (Assignment( lhs = Variable(name='YLSTACK'), rhs = Variable(name='YDSTACK')), )
 
         # YLSTACK%L8 = stack_l8 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)
-        l8_string = 'stack_l8 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)'
+        l8_string = f'stack_l8 (YSTACK, {params.block_counter}-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)'
 
         assignments += (Assignment( lhs = Variable(name='L8', parent = Variable(name='YLSTACK')),
                                  rhs = parse_fparser_expression(l8_string, scope=routine)  ),)                                                   
 
 
         # YLSTACK%U8 = stack_u8 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)
-        u8_string = 'stack_u8 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)'
+        u8_string = f'stack_u8 (YSTACK, {params.block_counter}-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)'
 
         assignments += (Assignment( lhs = Variable(name='U8', parent = Variable(name='YLSTACK')),
                                  rhs = parse_fparser_expression(u8_string, scope=routine)  ),)                                                   
 
 
         # YLSTACK%L4 = stack_l4 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)
-        l4_string = 'stack_l4 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)'
+        l4_string = f'stack_l4 (YSTACK, {params.block_counter}-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)'
+         
 
         assignments += (Assignment( lhs = Variable(name='L4', parent = Variable(name='YLSTACK')),
                                  rhs = parse_fparser_expression(l4_string, scope=routine)  ),)                                                   
 
 
         #YLSTACK%U4 = stack_u4 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)
-        u4_string = 'stack_u4 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)'
+        u4_string = f'stack_u4 (YSTACK, {params.block_counter}-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)'
 
         assignments += (Assignment( lhs = Variable(name='U4', parent = Variable(name='YLSTACK')),
                                  rhs = parse_fparser_expression(u4_string, scope=routine)  ),)                                                   
@@ -362,7 +363,7 @@ class MakeParallel(Transformation):
         
 
 
-        upper_bound_string = 'MIN (YDCPG_OPTS%KLON, YDCPG_OPTS%KGPCOMP - (JBLK - 1) * YDCPG_OPTS%KLON)'
+        upper_bound_string = f'MIN (YDCPG_OPTS%KLON, YDCPG_OPTS%KGPCOMP - ({params.block_counter} - 1) * YDCPG_OPTS%KLON)'
 
         # parse_fparser_expression(upper_bound_string, scope=routine)
 
