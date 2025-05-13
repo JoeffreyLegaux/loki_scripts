@@ -469,6 +469,7 @@ class MakeParallel(Transformation):
         # Add block counter declaration
         routine.variables += (self.block_counter,)
 
+
         # Use custom visitor to add PARALLEL suffix and stack variable to CallStatements outside PragmaRegions
         add_suffix_transform = AddSuffixToCalls(suffix='_PARALLEL_2', custom_visitor = FindNodesOutsidePragmaRegion, additional_variables = ['YDSTACK'])
         routine.apply(add_suffix_transform)
@@ -477,9 +478,23 @@ class MakeParallel(Transformation):
         for subroutine in add_suffix_transform.routines_called:
             self.addTransform(subroutine, 'PARALLEL')
        
-
         # Transform arrays of NPROMA size into ARRAY_XD types
         nproma_arrays, local_dimensions=self.npromaToFieldAPI(routine)
+        
+        for call in FindNodesOutsidePragmaRegion(CallStatement).visit(routine.body):
+            new_kwargs = ()
+            to_update = False
+            for couple in call.kwarguments:
+                if couple[1] in nproma_arrays:
+                    print("The couple found !!!!", couple[0], couple[1], type(couple[0]), type(couple[1]) )
+                    #Left part of positional argument is a string (does not exist in current scope)
+                    new_kwargs += ('YD_'+couple[0], couple[1]),
+                    to_update = True
+                else:
+                    new_kwargs += (couple[0], couple[1]),
+
+            call._update(kwarguments = new_kwargs)
+                
 
         # Search the local variable that contains the boundaries
         boundary_variable = None
