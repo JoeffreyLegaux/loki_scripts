@@ -484,7 +484,6 @@ class MakeParallel(Transformation):
             to_update = False
             for couple in call.kwarguments:
                 if couple[1] in nproma_arrays:
-                    print("The couple found !!!!", couple[0], couple[1], type(couple[0]), type(couple[1]) )
                     #Left part of positional argument is a string (does not exist in current scope)
                     new_kwargs += ('YD_'+couple[0], couple[1]),
                     to_update = True
@@ -630,81 +629,6 @@ class MakeParallel(Transformation):
             addFieldAPIPointers(routine, total_FAPI_pointers)
 
             routine.variables += (local_boundary_variable, local_stack,)   
-
-            # return
-
-
-
-            # if not outline:
-            #     region = AddSuffixToCalls(  suffix=('_SINGLE_COLUMN' if scc else '') + '_FIELD_API_' + target, 
-            #                                 node=region, 
-            #                                 additional_variables=['YLSTACK'] if scc else []).transform_subroutine(routine = routine)
-
-            # if outline:
-
-            #     new_subroutine = routine.clone( name = routine.name + "_PARALLEL_" + str(region_num), 
-            #                                     body = region.body,
-            #                                     spec = routine.spec.clone(),
-            #                                     contains = None)
-
-            #     new_subroutine.apply(AddSuffixToCalls(  suffix=('_SINGLE_COLUMN' if scc else '') + '_FIELD_API_' + target, 
-            #                                 # node=region, 
-            #                                 additional_variables=['YLSTACK'] if scc else []))
-
-            #     new_subroutine.apply(RemoveUnusedImports())
-
-            #     if scc:
-            #         true_symbols, false_symbols=logical_lst.symbols()
-            #         false_symbols.append('LHOOK')
-
-            #         scc_transform_routine(new_subroutine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols)
-
-            #     new_subroutine.apply(FieldAPIPtr(pointerType=target.lower()))
-            #     new_subroutine.apply(RemoveComments())
-            #     new_subroutine.apply(RemovePragmas())
-  
-                # We do not want JLON and YSTACK in the arguments
-                # remove_transform = RemoveUnusedVariables(['JLON', 'YLSTACK'])
-                # new_subroutine.apply(remove_transform)
-
-                # new_subroutine.spec.append(Pragma(keyword='acc', content='routine seq'))
-                # if directive == 'openacc':
-                #     new_subroutine.apply(AddACCRoutineDirectives())
-
-                # self.outlined_routines.append(new_subroutine)
-
-
-                # call_arguments = remove_transform.used_symbols
-                # call_arguments = SubstituteExpressions({
-                #                         Scalar(name=boundary_variable.name):Scalar(name=local_boundary_variable.name),
-                #                         Scalar(name='YDSTACK'):Scalar(name='YLSTACK')
-                #                         }).visit(call_arguments)
-
-                # call_parallel = CallStatement(name=new_subroutine.procedure_symbol, arguments=call_arguments)
-
-
-
-                # if directive == 'openacc':
-                #     columns_loop = self.makeOpenACCColumnsLoop(call_parallel, boundary_variable, local_boundary_variable, routine)
-                
-            # if not outline:
-            #     loop_body = region.body
-            # else:
-            #     if directive == 'openacc':
-            #         loop_body = columns_loop
-            #     else:
-            #         loop_body = call_parallel
-
-            # blocks_loop = Loop( variable=self.block_counter, 
-            #                     bounds=LoopRange(( IntLiteral(1), self.block_symbol )), 
-            #                     body = (loop_new_statements, loop_body,), 
-            #                     pragma = (loop_pragma,)   
-            #                     )
-            # routine.body = Transformer({region:(call_sync,blocks_loop,)}).visit(routine.body)
-
-            # if not outline:
-            #     # Default behaviour : apply FieldAPI transformation to the loop body
-            #     routine.apply(FieldAPIPtr(pointerType=target.lower(), node=blocks_loop ))
 
 
         # We remove remaining imports only after having treated all Parallel blocks 
