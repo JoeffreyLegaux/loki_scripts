@@ -469,7 +469,7 @@ class MakeParallel(Transformation):
 
 
         # Use custom visitor to add PARALLEL suffix and stack variable to CallStatements outside PragmaRegions
-        add_suffix_transform = AddSuffixToCalls(suffix='_PARALLEL_2', custom_visitor = FindNodesOutsidePragmaRegion, additional_variables = ['YDSTACK'])
+        add_suffix_transform = AddSuffixToCalls(suffix='_PARALLEL_2', custom_visitor = FindNodesOutsidePragmaRegion)
         routine.apply(add_suffix_transform)
 
 
