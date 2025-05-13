@@ -197,10 +197,8 @@ class MakeParallel(Transformation):
                     arrays_types_dimensions.add(array_type_dim)
                         
                     new_var = Variable(     name=f'Y{("D" if isArgument else "L")}_{var.name}', 
-                            type=SymbolAttributes(  DerivedType(name=f'FIELD_{array_type_dim}_ARRAY'), 
-                                                                    intent=var.type.intent, 
-                                                                    scope = routine
-                                                                    ) 
+                                            type=var.type.clone(dtype=DerivedType(name=f'FIELD_{array_type_dim}_ARRAY'),
+                                                                kind=None)
                                     )
 
                     nproma_arrays_map[var] = new_var
