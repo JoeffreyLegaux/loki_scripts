@@ -253,6 +253,9 @@ class MakeParallel(Transformation):
 
         routine.spec.prepend(Import(module="YOMPARALLELMETHOD"))
         routine.spec.prepend(Import(module="FIELD_ARRAY_MODULE"))
+        routine.spec.prepend(Import(module="STACK_MOD"))
+
+
 
         return ([nproma_names_map[var] for var in nproma_names_map], locals_dimensions)
 
@@ -260,7 +263,7 @@ class MakeParallel(Transformation):
 
         init_bounds = CallStatement(name = DeferredTypeSymbol( name='INIT',
                                                                parent = boundary_variable),
-                                    arguments=(self.block_counter),
+                                    arguments=(Variable(name=params.cpg_opts_variable)),
                                     scope = routine
                                     )
         loop_pragma = Pragma(   keyword="OMP", 
@@ -387,7 +390,7 @@ class MakeParallel(Transformation):
         # Create synchronisation call 
         # building a subroutine that contains only the current region
         # Apply the Makesync transformation, then append it as a member routine
-        sync_name = routine.name+"_PARALLEL_" + str(region_num) + "_SYNC_" + target
+        sync_name = routine.name+"_PARALLEL_2_" + str(region_num) + "_SYNC_" + target
         sync_routine = routine.clone(body = body, spec = spec, name = sync_name)
 
         sync_routine.apply(RemoveLoops())
@@ -466,7 +469,7 @@ class MakeParallel(Transformation):
         routine.variables += (self.block_counter,)
 
         # Use custom visitor to add PARALLEL suffix and stack variable to CallStatements outside PragmaRegions
-        add_suffix_transform = AddSuffixToCalls(suffix='_PARALLEL', custom_visitor = FindNodesOutsidePragmaRegion, additional_variables = ['YDSTACK'])
+        add_suffix_transform = AddSuffixToCalls(suffix='_PARALLEL_2', custom_visitor = FindNodesOutsidePragmaRegion, additional_variables = ['YDSTACK'])
         routine.apply(add_suffix_transform)
 
 
@@ -510,7 +513,6 @@ class MakeParallel(Transformation):
 
             print("targets and name : ", targets, name)
    
-                       #Generate sync subroutines for [HOST, DEVICE]
             archs = [False, False]
             for target in targets:  
                 if 'OpenMP' in target:
@@ -518,6 +520,7 @@ class MakeParallel(Transformation):
                 elif 'OpenACC' in target:
                     archs[1] = True
 
+            #Generate sync subroutines for [HOST, DEVICE]
             sync_names = [None, None]
             if archs[0]:
                 (sync_names[0], sync_FAPI_pointers) = self.makeRegionSyncCall(routine, 'HOST', region_num, region.body, unmodified_spec, nproma_arrays)
@@ -545,32 +548,23 @@ class MakeParallel(Transformation):
                 #Create the replacement body for the region for current target
 
                 if (target == 'OpenMP'):
-
-                   # Default behaviour : apply FieldAPI transformation to the loop body
-                    
-                    new_region = FieldAPIPtr(pointerType='host', node=region).transform_node(region, routine)
-
+                    new_region = FieldAPIPtr(pointerType='host').transform_node(region, routine)
                     new_loop = self.makeOpenMPLoop(routine, local_boundary_variable, new_region)
                     new_body = (call_sync, new_loop,)
-                elif (target == 'OpenMPSingleColumn'):
 
+                elif (target == 'OpenMPSingleColumn'):
                     # Check for outline necessity : if region only contains calls, directly call SCC variants
                     # Otherwise, create a contained subroutine with the transformed region
-                    # new_region = FieldAPIPtr(pointerType='host', node=region).transform_node(region, routine)
-                    # new_region = region.clone()
                     if self.containsOnlyCalls(region):
-                        new_region = FieldAPIPtr(pointerType='device', node=region).transform_node(new_region, routine)
-
-                        add_suffix_transform = AddSuffixToCalls(  suffix=('_SCC_HOST'), additional_variables=['YDSTACK=YLSTACK'] )
+                        new_region = FieldAPIPtr(pointerType='host').transform_node(region, routine)
+                        add_suffix_transform = AddSuffixToCalls(suffix=('_SCC_HOST'), additional_variables=['YDSTACK=YLSTACK'] )
                         new_region = add_suffix_transform.transform_node(new_region, routine)
+
                         for subroutine in add_suffix_transform.routines_called:
                             self.addTransform(subroutine, 'SCC_HOST')
                     else:
-                        # new_region = self.makeParallelSubroutine(routine, new_region, region_num, scc=True, target='host')
                         new_region = self.makeParallelSubroutine(routine, region, region_num, scc=True, target='host')
                         
-                        # new_region = FieldAPIPtr(pointerType='host', node=new_region).transform_node(new_region, routine)
-                        # new_region = region.clone() 
 
 
                     new_loop = self.makeOpenMPSCCLoop(routine, local_boundary_variable, new_region)
@@ -578,15 +572,13 @@ class MakeParallel(Transformation):
                 
                 elif (target == 'OpenACCSingleColumn'):
                     if self.containsOnlyCalls(region):
-                        new_region = FieldAPIPtr(pointerType='device', node=region).transform_node(new_region, routine)
+                        new_region = FieldAPIPtr(pointerType='device').transform_node(region, routine)
 
                         add_suffix_transform = AddSuffixToCalls(  suffix=('_SCC_DEVICE'), additional_variables=['YDSTACK=YLSTACK'] )
                         new_region = add_suffix_transform.transform_node(new_region, routine)
                         for subroutine in add_suffix_transform.routines_called:
                             self.addTransform(subroutine, 'SCC_DEVICE')
                     else:
-                        # new_region = region.clone()
-                        # new_region = self.makeParallelSubroutine(routine, new_region, region_num, scc=True, target='device')
                         new_region = self.makeParallelSubroutine(routine, region, region_num, scc=True, target='device')
                     
                     new_loop = self.makeOpenACCSCCLoop(routine, local_boundary_variable, new_region)

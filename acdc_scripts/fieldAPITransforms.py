@@ -102,7 +102,7 @@ def get_pointers_to_FieldAPI(routine, nproma_variables):
 
 
 class FieldAPIPtr(Transformation):
-    def __init__(self, pointerType='host', node=None):
+    def __init__(self, pointerType='host'):
         if (pointerType == 'host') :
             self.pointerSuffix = 'PTR'
         elif (pointerType == 'device') :
@@ -111,20 +111,17 @@ class FieldAPIPtr(Transformation):
             error(f'Unrecognised pointer type : {pointerType}')
             exit(1)
 
-        if node:
-            assert hasattr(node, "body")
-        self.node = node
-        
+       
 
     def transform_node(self, node, routine, inplace = False):
+        if node:
+            assert hasattr(node, "body")
+        
         fieldAPI_variables = get_fieldAPI_variables(routine)
 
         variables_map = {}
 
         block_index = Variable(name=params.block_counter, scope=routine)
-
-
-        # body = self.node.body if self.node else routine.body
 
         for var in FindVariables().visit(node.body) :
             
@@ -171,9 +168,8 @@ class FieldAPIPtr(Transformation):
             node.body = SubstituteExpressions(variables_map).visit(node.body)
             return None
         else:
-            # print("variables map  ", variables_map)
-            new_node = self.node.clone(body = SubstituteExpressions(variables_map).visit(self.node.body) )
-            return new_node            
+            new_node = node.clone(body = SubstituteExpressions(variables_map).visit(node.body))
+            return new_node
 
 
     def transform_subroutine(self, routine, **kwargs):
