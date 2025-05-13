@@ -254,7 +254,7 @@ class MakeParallel(Transformation):
         routine.spec.prepend(Import(module="YOMPARALLELMETHOD"))
         routine.spec.prepend(Import(module="FIELD_ARRAY_MODULE"))
         routine.spec.prepend(Import(module="STACK_MOD"))
-
+        routine.spec.prepend(Import(module='stack.h', c_import=True))
 
 
         return ([nproma_names_map[var] for var in nproma_names_map], locals_dimensions)
@@ -451,7 +451,7 @@ class MakeParallel(Transformation):
             true_symbols, false_symbols=logical_lst.symbols()
             false_symbols.append('LHOOK')
 
-            scc_transform_routine(new_subroutine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols, FieldAPI_pointers=self.FieldAPI_pointers)
+            scc_transform_routine(new_subroutine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols, FieldAPI_pointers=self.FieldAPI_pointers, is_node=True)
 
         new_subroutine.apply(RemoveComments())
         new_subroutine.apply(RemovePragmas())
