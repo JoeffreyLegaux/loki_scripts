@@ -173,20 +173,25 @@ class MakeParallel(Transformation):
         init_calls = ()
         final_calls = ()
 
-
         for var in FindVariables().visit(routine.spec):
 
             if isinstance(var, Array):
 
-                to_transform = False
+                is_FAPI_pointer = var.name in self.FieldAPI_pointers
 
-                firstdim = var.dimensions[0] 
+                is_nproma = False
+                if not is_FAPI_pointer :
+                    firstdim = var.dimensions[0] 
+                
+                    #Naively considering ranges with (xxx:nproma) are nproma-sized
+                    if isinstance(firstdim, RangeIndex):
+                        firstdim = firstdim.upper
 
-                if isinstance(firstdim, RangeIndex):
-                    firstdim = firstdim.upper
+                    is_nproma = firstdim in params.nproma_aliases
+                
+                if is_FAPI_pointer or is_nproma:
 
-                if firstdim in params.nproma_aliases:
-                    isArgument = var in routine.arguments
+                    is_argument = var in routine.arguments
                 
                     #print("variable to FAPI : ", var, type(var))
                     #print("type : ", type(var.type.kind.name))
@@ -196,7 +201,7 @@ class MakeParallel(Transformation):
 
                     arrays_types_dimensions.add(array_type_dim)
                         
-                    new_var = Variable(     name=f'Y{("D" if isArgument else "L")}_{var.name}', 
+                    new_var = Variable(     name=f'Y{("D" if is_argument else "L")}_{var.name}', 
                                             type=var.type.clone(dtype=DerivedType(name=f'FIELD_{array_type_dim}_ARRAY'),
                                                                 kind=None)
                                     )
@@ -205,7 +210,7 @@ class MakeParallel(Transformation):
                     nproma_names_map[var.name] = new_var
                     nproma_arrays_dimensions[var.name] = var.dimensions
 
-                    if not isArgument :
+                    if not (is_argument or is_FAPI_pointer):
 
                         init_calls += (CallStatement(name = DeferredTypeSymbol(name='INIT', parent = new_var), 
                                                             
@@ -215,6 +220,8 @@ class MakeParallel(Transformation):
                         final_calls += (CallStatement(name = DeferredTypeSymbol(name='FINAL', parent = new_var), 
                                                                 arguments=(), scope=routine), )
 
+
+        print("nproma arrays map : ", nproma_arrays_map)
 
         routine.spec = SubstituteExpressions(nproma_arrays_map).visit(routine.spec)
         
@@ -450,7 +457,9 @@ class MakeParallel(Transformation):
             true_symbols, false_symbols=logical_lst.symbols()
             false_symbols.append('LHOOK')
 
-            scc_transform_routine(new_subroutine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols, FieldAPI_pointers=self.FieldAPI_pointers, is_node=True)
+            prefixed_FieldAPI_pointers = {'YL_'+key:value for key,value in self.FieldAPI_pointers.items()}
+
+            scc_transform_routine(new_subroutine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols, FieldAPI_pointers=prefixed_FieldAPI_pointers, is_node=True)
 
         new_subroutine.apply(RemoveComments())
         new_subroutine.apply(RemovePragmas())
