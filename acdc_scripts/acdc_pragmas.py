@@ -107,17 +107,23 @@ output_path = source_path + 'local/'
 output_path_sources = output_path + 'ifsaux/loki_sources/'
 output_path_interfaces = output_path + 'ifsaux/loki_interfaces/'
 
+
 # Start at CPG_DYN_SLG with empty list of forced transformations
 
 #routines_to_transform = {'CPG_DYN_SLG':{'PARALLEL'},}
-#routines_to_transform = {'LACDYN':{'PARALLEL', },}  # 'ABORT'},}
-#routines_to_transform = {'VERINT':{'ABORT','SYNC_DEVICE','SCC_DEVICE'},}
-#routines_to_transform = {'VERDISINT':{'SYNC_DEVICE'},}
+#routines_to_transform = {'LACDYN':{'PARALLEL', 'ABORT'},}
+#routines_to_transform = {'VERINT':{'SCC_DEVICE'},}
+#routines_to_transform = {'VERDISINT':{'ABORT'},}
 #routines_to_transform = {'SIGAM_GP':{'ABORT'},}
-routines_to_transform = {'LASSIE':{'ABORT','PARALLEL'},}
 #routines_to_transform = {'GPRCP_EXPL':{'PARALLEL'},}
-
+#routines_to_transform = {'GPRCP_EXPL':{'SCC_DEVICE'},}
+routines_to_transform = {'LAVENT':{'ABORT','PARALLEL'},}
+#routines_to_transform = {'LASSIE':{'SYNC_DEVICE'},}
 treated_routines = {}
+
+# If set to False, only apply transformation listed in routines_to_transform
+# If set to True, enqueue subroutines called during a transformation for further transformation
+recursive_process = True #False #True
 
 while (len(routines_to_transform) > 0):
     routine =  next(iter(routines_to_transform))
@@ -221,8 +227,10 @@ while (len(routines_to_transform) > 0):
                     # Change called subroutines names, import their interface and add !$acc routine directives if relevant
                     add_suffix_transform =(AddSuffixToCalls(suffix='_'+transform, additional_kwvariables=[('YDSTACK','YLSTACK')]))
                     new_routine.apply(add_suffix_transform)
-                    for subroutine in add_suffix_transform.routines_called:
-                        add_to_transforms(subroutine, {transform})
+                    
+                    if recursive_process:
+                        for subroutine in add_suffix_transform.routines_called:
+                            add_to_transforms(subroutine, {transform})
 
                     if not isHost:
                         new_routine.spec.append(Pragma(keyword='acc', content='routine seq'))
@@ -265,8 +273,10 @@ while (len(routines_to_transform) > 0):
                 add_suffix_transform = AddSuffixToCalls(suffix='_SYNC_HOST' if isHost else '_SYNC_DEVICE')
                 new_routine.apply(add_suffix_transform)
                 print("after add suffix")
-                for subroutine in add_suffix_transform.routines_called:
-                    add_to_transforms(subroutine, {transform})
+                
+                if recursive_process:
+                    for subroutine in add_suffix_transform.routines_called:
+                        add_to_transforms(subroutine, {transform})
 
                 # Resolve associates because variables might be associated to a Field API member and we need to identify them
                 do_resolve_associates(new_routine)
@@ -314,8 +324,9 @@ while (len(routines_to_transform) > 0):
                 new_routine.apply(RemoveComments())
                 new_routine.apply(RemoveEmptyConditionals())
 
-                for subroutine in add_suffix_transform.routines_called:
-                    add_to_transforms(subroutine, {'ABORT'})
+                if recursive_process:
+                    for subroutine in add_suffix_transform.routines_called:
+                        add_to_transforms(subroutine, {'ABORT'})
 
 
                 transfodep = DependencyTransformation(suffix='_ABORT', include_path=output_path_interfaces)
@@ -334,7 +345,7 @@ while (len(routines_to_transform) > 0):
             print(f'call {transform} ')
             print("====_____________================______________================______________=================")
             #filename = output_path + file[:-4] + '_parallel.F90'
-            filename = output_path_sources + file_without_path[:-4] + '_parallel.F90'
+            filename = output_path_sources + file_without_path[:-4] + '_parallel2.F90'
             print("ouput file opened : ", filename)
             f = open(filename, 'w')
             for routine in routines:
@@ -352,14 +363,16 @@ while (len(routines_to_transform) > 0):
                 print("routine parallele : ", parallel_transform.subroutines_to_transform)
                 # We probably will have for new routines 'PARALLEL' 'SYNC' and 'ABORT' transforms to add
                 print("treated routines : ", treated_routines)
-                for subroutine in parallel_transform.subroutines_to_transform:
-                    add_to_transforms(subroutine, parallel_transform.subroutines_to_transform[subroutine])
-                    print("added transfo ", subroutine, parallel_transform.subroutines_to_transform[subroutine])
+                
+                if recursive_process:
+                    for subroutine in parallel_transform.subroutines_to_transform:
+                        add_to_transforms(subroutine, parallel_transform.subroutines_to_transform[subroutine])
+                        print("added transfo ", subroutine, parallel_transform.subroutines_to_transform[subroutine])
                 print("routines to trasnsform ? ", routines_to_transform)
                     
                 new_routine.apply(RemovePragmaRegions())
 
-                transfodep = DependencyTransformation(suffix='_PARALLEL', include_path=output_path_interfaces)
+                transfodep = DependencyTransformation(suffix='_PARALLEL2', include_path=output_path_interfaces)
                 new_routine.apply(transfodep, role='kernel')
                 
                 print("writing to file : ", filename)

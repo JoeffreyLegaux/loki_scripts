@@ -12,9 +12,10 @@ from storable import retrieve
 
 from syncTransforms import MakeSync, addFieldAPIPointers
 
-from fieldAPITransforms import FieldAPIPtr
+from fieldAPITransforms import FieldAPIPtr, get_fieldAPI_variables, get_fieldAPI_member
 from commonTransforms import InlineMemberCalls, RemoveComments, RemovePragmas, RemovePragmaRegions, RemoveEmptyConditionals, \
-                                AddSuffixToCalls, RemoveLoops, RemoveUnusedVariables, AddACCRoutineDirectives, RemoveUnusedImports
+                                AddSuffixToCalls, RemoveLoops, RemoveUnusedVariables, AddACCRoutineDirectives, \
+                                RemoveUnusedImports, FindNodesOutsidePragmaRegion, ReplaceArguments
 
 from arpege_parameters import params
 
@@ -25,47 +26,10 @@ from openacc_transform import scc_transform_routine, alloc_temp
 from termcolor import colored
 
 
-class FindNodesOutsidePragmaRegion(FindNodes):
-    """
-     Find :any:`Node` instances that match a given criterion,
-     but ignores nodes that are inside a PragmaRegion
-
-    """
-    def __init__(self, match, greedy=False):
-        super().__init__(match, mode='type', greedy=greedy)
-
-
-    def visit_tuple(self, o, **kwargs):
-        """
-        Visit all elements that are not PragmaRegion in the iterable and return the combined result.
-        """
-        ret = kwargs.pop('ret', self.default_retval())
-        for i in o:
-            if not isinstance(i, PragmaRegion):
-                ret = self.visit(i, ret=ret, **kwargs)
-        return ret or self.default_retval()
-
-    def visit_Node(self, o, **kwargs):
-        """
-        Add the node to the returned list if it matches the criteria
-        before visiting all children that are not PragmaRegion nodes.
-        """
-
-        ret = kwargs.pop('ret', self.default_retval())
-        if self.rule(self.match, o):
-            ret.append(o)
-            if self.greedy:
-                return ret
-        for i in o.children:
-            if not isinstance(i, PragmaRegion):
-                ret = self.visit(i, ret=ret, **kwargs)
-        return ret or self.default_retval()
-
-
-
 class MakeParallel(Transformation):
-    def __init__(self,  FieldAPI_pointers={}):        
+    def __init__(self,  FieldAPI_pointers={}, top_level_routine=False):        
         self.FieldAPI_pointers = FieldAPI_pointers
+        self.top_level_routine = top_level_routine
         self.block_symbol = DeferredTypeSymbol( name=params.block_dimension, 
                                                 parent = DeferredTypeSymbol(name=params.cpg_opts_variable))
         
@@ -100,8 +64,8 @@ class MakeParallel(Transformation):
                 lower_bounds.append(1)
                 upper_bounds.append(dim)
 
-        lower_bounds.append(1)
-        upper_bounds.append(self.block_symbol)
+        lower_bounds.append(self.block_min_symbol)
+        upper_bounds.append(self.block_max_symbol)
 
         has_lower = any(x != 1 for x in lower_bounds)
 
@@ -170,8 +134,8 @@ class MakeParallel(Transformation):
         
         arrays_types_dimensions = set()
 
-        init_calls = ()
-        final_calls = ()
+        field_new_calls = ()
+        field_delete_calls = ()
 
         for var in FindVariables().visit(routine.spec):
 
@@ -202,8 +166,18 @@ class MakeParallel(Transformation):
                     arrays_types_dimensions.add(array_type_dim)
                         
                     new_var = Variable(     name=f'Y{("D" if is_argument else "L")}_{var.name}', 
-                                            type=var.type.clone(dtype=DerivedType(name=f'FIELD_{array_type_dim}_ARRAY'),
-                                                                kind=None)
+                                            type=var.type.clone(dtype=DerivedType(name=f'FIELD_{array_type_dim}'),
+                                                                kind=None, 
+                                                                # Abstract types require polymorphism
+                                                                polymorphic=True, 
+                                                                # Dummy arrays can stay target, local arrays have to become
+                                                                # pointers which conflict with target attribute
+                                                                #target = var.type.target if not is_argument else False,
+                                                                target = False,
+                                                                #pointer = False if (is_argument and var.type.target) else True
+                                                                #pointer = True if is_argument else var.type.pointer
+                                                                pointer = True
+                                                                )
                                     )
 
                     nproma_arrays_map[var] = new_var
@@ -211,17 +185,66 @@ class MakeParallel(Transformation):
                     nproma_arrays_dimensions[var.name] = var.dimensions
 
                     if not (is_argument or is_FAPI_pointer):
+                        # Only create locally declared FieldAPI object
+                        #if not is_argument:ddi    
+                        field_new_calls += (CallStatement(name = DeferredTypeSymbol(name='FIELD_NEW'),
+                                                                arguments = new_var,
+                                                                kwarguments = self.boundariesArgument(var) + (('PERSISTENT', LogicLiteral(True)), ),
+                                                                scope=routine
+                                                            ),
+        
+                                               )
 
-                        init_calls += (CallStatement(name = DeferredTypeSymbol(name='INIT', parent = new_var), 
-                                                            
-                                                            kwarguments = self.boundariesArgument(var) + (('PERSISTENT', LogicLiteral(True)), ),
-                                                            scope=routine) ,)
+                        # For all FieldAPI object : call copy_object to have the structure offloaded 
+                        # (device pointer is already present, but not the whole object)
+                        #associated_call = InlineCall(function=DeferredTypeSymbol(name='ASSOCIATED'), parameters=(new_var,) ) 
+                        #present_call = InlineCall(function=DeferredTypeSymbol(name='PRESENT'), parameters=(new_var,) )
+                        copy_call = CallStatement(name = DeferredTypeSymbol(name='COPY_OBJECT', 
+                                                                            parent = new_var
+                                                                            ),
+                                                    arguments=(), scope=routine
+                                                    ) 
+                        # Arguments might be unassociated pointers
+                        #if is_argument and var.type.optional :
+                        #    field_new_calls += (Conditional(condition=present_call, body = (copy_call,), inline = True), )
+                        #else:
+                        #if not (is_argument):
+                        field_new_calls += (copy_call,)
+                                             
+                        # Symmetrically, call WIPE_OBJECT at the end to remove the structure from GPU memory
+                        wipe_call = CallStatement(name = DeferredTypeSymbol(name='WIPE_OBJECT', 
+                                                                            parent = new_var
+                                                                           ),
+                                                    arguments=(), scope=routine
+                                                    )
 
-                        final_calls += (CallStatement(name = DeferredTypeSymbol(name='FINAL', parent = new_var), 
-                                                                arguments=(), scope=routine), )
+                        #if is_argument and var.type.optional:
+
+                        #    field_delete_calls += (Conditional(condition=present_call, body = (wipe_call,), inline = True), )
+                        #else:
+                        # Current dirty fix : do not wipe arguments to ensure presence in the caller
+                        # We really should have this when they are constructed/destroyed !!!!
+                        #if not is_argument:
+                        field_delete_calls += (wipe_call,)
+                         
+                        # Finally, actually delete the local FieldAPI objects
+                        #if not is_argument:
+                        delete_call = CallStatement(name = DeferredTypeSymbol(name='FIELD_DELETE'), arguments = new_var)
+                            #field_delete_calls += (Conditional(condition=associated_call, body = (delete_call,), inline = True), )                 
+                        field_delete_calls += (delete_call,)
+                        #init_calls += (CallStatement(name = DeferredTypeSymbol(name='INIT', parent = new_var), 
+                        #                                    
+                        #                                    kwarguments = self.boundariesArgument(var) + (('PERSISTENT', LogicLiteral(True)), ),
+                        #                                    scope=routine) ,)
+
+                        #final_calls += (CallStatement(name = DeferredTypeSymbol(name='FINAL', parent = new_var), 
+                        #                                        arguments=(), scope=routine), )
 
 
-        print("nproma arrays map : ", nproma_arrays_map)
+                                       
+
+
+        #print("nproma arrays map : ", nproma_arrays_map)
 
         routine.spec = SubstituteExpressions(nproma_arrays_map).visit(routine.spec)
         
@@ -243,8 +266,8 @@ class MakeParallel(Transformation):
         routine.body = SubstituteExpressions(body_vars_map).visit(routine.body)
 
 
-        routine.body.prepend(init_calls)
-        routine.body.append(final_calls)
+        routine.body.prepend(field_new_calls)
+        routine.body.append(field_delete_calls)
 
         # Create imports for module ARRAY_MOD and UTIL_ARRAY_xD_MOD
         #routine.spec.prepend(Import(module="ARRAY_MOD", 
@@ -257,7 +280,10 @@ class MakeParallel(Transformation):
         routine.spec.prepend(Import(module="FIELD_BASIC_MODULE", symbols=(DeferredTypeSymbol(name='FIELD_BASIC'),)))
 
         routine.spec.prepend(Import(module="YOMPARALLELMETHOD"))
-        routine.spec.prepend(Import(module="FIELD_ARRAY_MODULE"))
+        #routine.spec.prepend(Import(module="FIELD_ARRAY_MODULE"))
+        routine.spec.prepend(Import(module="FIELD_MODULE"))
+        routine.spec.prepend(Import(module="FIELD_FACTORY_MODULE"))
+
         routine.spec.prepend(Import(module="STACK_MOD"))
         routine.spec.prepend(Import(module='stack.h', c_import=True))
 
@@ -291,7 +317,7 @@ class MakeParallel(Transformation):
 
         loop_pragma = Pragma(   keyword="OMP", 
                                 content = "PARALLEL DO PRIVATE ("+ self.block_counter.name + ', JLON,'+
-                                boundary_variable.name + ', YSTACK' + self.getPrivateNameList(region) + ") "
+                                boundary_variable.name + ', YLSTACK' + self.getPrivateNameList(region) + ") "
                             )
 
         columns_loop = self.makeColumnsLoop(routine, boundary_variable, region)              
@@ -304,7 +330,7 @@ class MakeParallel(Transformation):
     def makeOpenACCSCCLoop(self, routine, boundary_variable, region):
 
         loop_pragma = Pragma(   keyword="ACC", 
-                                    content = "PARALLEL LOOP GANG FIRSTPRIVATE ("+ boundary_variable.name +") PRIVATE (" + params.block_counter + ")"
+                                    content = "PARALLEL LOOP GANG DEFAULT(PRESENT) PRIVATE (" + params.block_counter + ")"
                             )
 
         columns_loop = self.makeColumnsLoop(routine, boundary_variable, region, 'OpenACC')              
@@ -458,6 +484,7 @@ class MakeParallel(Transformation):
             false_symbols.append('LHOOK')
 
             prefixed_FieldAPI_pointers = {'YL_'+key:value for key,value in self.FieldAPI_pointers.items()}
+            #prefixed_FieldAPI_pointers['YLCPG_BNDS%KIDIA'] = 'YDCPG_BNDS%KIDIA'
 
             scc_transform_routine(new_subroutine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols, FieldAPI_pointers=prefixed_FieldAPI_pointers, is_node=True)
 
@@ -471,6 +498,7 @@ class MakeParallel(Transformation):
 
     def transform_parallel_regions(self, routine):
 
+        self.fieldAPI_variables = get_fieldAPI_variables(routine)
         unmodified_spec = routine.spec.clone()
 
         # Add block counter declaration
@@ -478,7 +506,7 @@ class MakeParallel(Transformation):
 
 
         # Use custom visitor to add PARALLEL suffix and stack variable to CallStatements outside PragmaRegions
-        add_suffix_transform = AddSuffixToCalls(suffix='_PARALLEL_2', custom_visitor = FindNodesOutsidePragmaRegion)
+        add_suffix_transform = AddSuffixToCalls(suffix='_PARALLEL2', custom_visitor = FindNodesOutsidePragmaRegion)
         routine.apply(add_suffix_transform)
 
 
@@ -487,8 +515,11 @@ class MakeParallel(Transformation):
        
         # Transform arrays of NPROMA size into ARRAY_XD types
         nproma_arrays, local_dimensions=self.npromaToFieldAPI(routine)
-        
+       
+        # Transform arguments in the call
         for call in FindNodesOutsidePragmaRegion(CallStatement).visit(routine.body):
+            # Change name of positional arguments receiving a fieldAPI array
+            # (since their name changes also in the subroutine)
             new_kwargs = ()
             to_update = False
             for couple in call.kwarguments:
@@ -500,6 +531,26 @@ class MakeParallel(Transformation):
                     new_kwargs += (couple[0], couple[1]),
 
             call._update(kwarguments = new_kwargs)
+
+            # If array view are passed as arguments, change them into their FieldAPI counterpart
+            new_args=()
+            updated_args = False
+            for var in call.arguments:
+                is_new_var = False
+                if isinstance(var, DeferredTypeSymbol):
+                    base_name = var.name_parts[0]
+                    if base_name in self.fieldAPI_variables:
+                        member_name = var.name_parts[1:]
+                        member_name = [self.fieldAPI_variables[base_name]] + member_name
+                        fAPI_member = get_fieldAPI_member(member_name)
+                        if fAPI_member :
+                            new_args += (Variable(name = fAPI_member[0], parent=var.parent, scope=routine),)
+                            updated_args = True
+                            is_new_var = True
+                if not is_new_var:
+                    new_args +=(var,)
+            if updated_args:
+                call._update(arguments = new_args)
                 
 
         # Search the local variable that contains the boundaries
@@ -582,6 +633,10 @@ class MakeParallel(Transformation):
                         add_suffix_transform = AddSuffixToCalls(suffix=('_SCC_HOST'), additional_variables=['YDSTACK=YLSTACK'] )
                         new_region = add_suffix_transform.transform_node(new_region, routine)
 
+                        for call in FindNodes(CallStatement).visit(new_region.body):
+                            ReplaceArguments(call, {'YDCPG_BNDS%KIDIA':Variable(name='KIDIA', parent = local_boundary_variable), \
+                                                    'YDCPG_BNDS%KFDIA':Variable(name='KFDIA', parent = local_boundary_variable)})
+
                         for subroutine in add_suffix_transform.routines_called:
                             self.addTransform(subroutine, 'SCC_HOST')
                     else:
@@ -598,6 +653,10 @@ class MakeParallel(Transformation):
 
                         add_suffix_transform = AddSuffixToCalls(  suffix=('_SCC_DEVICE'), additional_variables=['YDSTACK=YLSTACK'] )
                         new_region = add_suffix_transform.transform_node(new_region, routine)
+                        for call in FindNodes(CallStatement).visit(new_region.body):
+                            ReplaceArguments(call, {'YDCPG_BNDS%KIDIA':Variable(name='KIDIA', parent = local_boundary_variable), \
+                                                    'YDCPG_BNDS%KFDIA':Variable(name='KFDIA', parent = local_boundary_variable)})
+
                         for subroutine in add_suffix_transform.routines_called:
                             self.addTransform(subroutine, 'SCC_DEVICE')
                     else:
@@ -613,7 +672,7 @@ class MakeParallel(Transformation):
                 #Create nested conditionals with call to LPARALLELMETHOD in conditions
 
                 expr = InlineCall(function=DeferredTypeSymbol(name='LPARALLELMETHOD'), 
-                        parameters=(StringLiteral(target.upper()),StringLiteral(f'{routine.name}:{name}'), ))
+                        parameters=(StringLiteral(target.upper()),StringLiteral(f'{routine.name}_PARALLEL2:{name}'), ))
              
                 if (index == 0) : 
                     outer_cond = Conditional(condition=expr, body=new_body)
@@ -627,7 +686,7 @@ class MakeParallel(Transformation):
 
                 #Final ELSE branch only contains a call to ABOR1
                 current_cond._update(else_body = (CallStatement(name = DeferredTypeSymbol(name='ABOR1'),
-                                                                arguments=(StringLiteral(f'{routine.name}_PARALLEL : METHOD WAS NOT FOUND')),
+                                                                arguments=(StringLiteral(f'{routine.name}_PARALLEL2 : METHOD WAS NOT FOUND')),
                                                                 scope=routine
                                                                 ),
                                                 )

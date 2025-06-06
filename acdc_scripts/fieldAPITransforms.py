@@ -17,8 +17,9 @@ from arpege_parameters import params
 
 
 def is_fieldAPI_ARRAY(typename):
-    return (re.search("^FIELD_\d(IM|LM|RD|RM|RB)_ARRAY$", typename) != None)
 
+    #return (re.search("^FIELD_\d(IM|LM|RD|RM|RB)_ARRAY$", typename) != None)
+    return (re.search("^FIELD_\d(IM|LM|RD|RM|RB)$", typename) != None)
 
 # extract the fieldAPI member corresponding to a variable represented
 # in the form of a list of its derived members
@@ -42,7 +43,7 @@ def get_fieldAPI_variables(routine):
     for var in routine.variables :
         if (isinstance(var.type.dtype, DerivedType)):
             typename = var.type.dtype.name
-            # Variables of type ARRAY_nD are automatically generated FieldAPI   
+            # Variables of type Field_nxx are automatically generated FieldAPI   
             if is_fieldAPI_ARRAY(typename) :
                 fieldAPI_variables[var.name] = typename
             elif typename in params.fieldAPI_types:
@@ -63,7 +64,8 @@ def get_pointers_to_FieldAPI(routine, nproma_variables):
     fieldAPI_variables = None
     for assign in FindNodes(Assignment).visit(routine.body):
         if assign.ptr :
-            if assign.lhs.name in ptr_list:
+            # Only treat values once
+            if assign.lhs.name in ptr_list and assign.lhs.name not in FieldAPI_ptrs_vars:
                 # only treat direct assignment to arrays variables
                 # Esp. avoid binding to NULL()
                 #print("rhs ? ", assign.rhs, type(assign.rhs)) 
@@ -143,7 +145,8 @@ class FieldAPIPtr(Transformation):
 
                     dimensions = dimensions + (block_index,)
 
-                    fAPI_var = Variable(name = "F_P", parent = Variable(name = base))                    
+                    #fAPI_var = Variable(name = "F_P", parent = Variable(name = base))                    
+                    fAPI_var = Variable(name = base)
                     variables_map[var] = Array(name=self.pointerSuffix, parent=fAPI_var, dimensions=dimensions)
 
                 else :
@@ -163,6 +166,7 @@ class FieldAPIPtr(Transformation):
                         dimensions += (block_index,)
                         fAPI_var = Variable(name = fAPI_member[0], parent=var.parent, scope=routine)
                         variables_map[var] = Array(name=self.pointerSuffix, scope=routine, parent=fAPI_var, dimensions=dimensions)
+                        #print( variables_map[var])
 
         if inplace:
             node.body = SubstituteExpressions(variables_map).visit(node.body)

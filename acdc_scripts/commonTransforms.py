@@ -17,6 +17,57 @@ from codetiming import Timer
 from storable import retrieve
 
 
+
+def ReplaceArguments(node, args_dict):
+    assert hasattr(node, "arguments") 
+    new_args = ()
+    for arg in node.arguments:
+        if arg.name in args_dict:
+            #new_args += (arg.clone(name = args_dict[arg.name]),)
+            new_args += (args_dict[arg.name],)
+        else:
+            new_args += (arg,)
+
+    node._update(arguments = new_args)
+
+class FindNodesOutsidePragmaRegion(FindNodes):
+    """
+     Find :any:`Node` instances that match a given criterion,
+     but ignores nodes that are inside a PragmaRegion
+
+    """
+    def __init__(self, match, greedy=False):
+        super().__init__(match, mode='type', greedy=greedy)
+
+
+    def visit_tuple(self, o, **kwargs):
+        """
+        Visit all elements that are not PragmaRegion in the iterable and return the combined result.
+        """
+        ret = kwargs.pop('ret', self.default_retval())
+        for i in o:
+            if not isinstance(i, PragmaRegion):
+                ret = self.visit(i, ret=ret, **kwargs)
+        return ret or self.default_retval()
+
+    def visit_Node(self, o, **kwargs):
+        """
+        Add the node to the returned list if it matches the criteria
+        before visiting all children that are not PragmaRegion nodes.
+        """
+
+        ret = kwargs.pop('ret', self.default_retval())
+        if self.rule(self.match, o):
+            ret.append(o)
+            if self.greedy:
+                return ret
+        for i in o.children:
+            if not isinstance(i, PragmaRegion):
+                ret = self.visit(i, ret=ret, **kwargs)
+        return ret or self.default_retval()
+
+
+
 # class RemoveImports(Transformation):
 #     def transform_subroutine(self, routine, **kwargs):
 #         imports_map = {}
@@ -63,28 +114,40 @@ class RemovePragmaRegions(Transformation):
 class ReplaceAbortRegions(Transformation):
     def __init__(self, abort_call = True):
         self.abort_call = abort_call 
+        print("init ", abort_call , self.abort_call)
     def transform_subroutine(self, routine, **kwargs):
         regions_map = {}
         for region in FindNodes(PragmaRegion).visit(routine.body):
+            print("region fouind : ", region.pragma, region.body)
+            for node in region.body:
+                print('node : ', node)
             if ('ABORT' in region.pragma.content):
+                print("abort it is !", self.abort_call)
                 # If abort_call is set to false, we will blindly erase the region
                 if not self.abort_call :
+                    print("not abort_call tavu !")
                     regions_map[region] = None
                 # If the ABORT directive has a KEEPME clause, we keep itscontent
-                elif ('KEEPME' not in region.pragma.content):
-                    # Otherwise, we replace the region with an ABOR1 call
+                elif ('KEEPME' in region.pragma.content):
+                    regions_map[region] = region.body
+                # Otherwise, we replace the region with an ABOR1 call
+                else:
                     regions_map[region] = (CallStatement(name = DeferredTypeSymbol(name='ABOR1'), 
                                                         arguments=(StringLiteral('ERROR : WRONG SETTINGS')), 
                                                         scope=routine), 
                                            )
+            # If KEEPME pragma without ABORT, we keep the region content regardless        
+            elif ('KEEPME' in region.pragma.content):
+                regions_map[region] = region.body
 
+        print("Regiobn map ? ", regions_map)
         routine.body = Transformer(regions_map).visit(routine.body)
 
 
 class RemoveAssignments(Transformation):
     def transform_subroutine(self, routine, **kwargs):
         assigns_map = {}
-        for assign in FindNodes(Assignment).visit(routine.body):
+        for assign in FindNodesOutsidePragmaRegion(Assignment).visit(routine.body):
             assigns_map[assign] = None
         routine.body = Transformer(assigns_map).visit(routine.body)
  

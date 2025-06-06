@@ -1,7 +1,7 @@
 from loki import (Frontend, Sourcefile, FindNodes, Loop, Node, Intrinsic, Subroutine, Transformer, NestedTransformer, 
     PragmaRegion, DerivedType, Transformation, CallStatement, SymbolAttributes, BasicType, FindTypedSymbols, FindVariables, SubstituteExpressions, FindInlineCalls  )
 
-from loki.ir import Section, Comment, CommentBlock, VariableDeclaration, Pragma, Import, Assignment, Conditional, LeafNode, InternalNode, Associate
+from loki.ir import Section, Comment, CommentBlock, VariableDeclaration, Pragma, Import, Assignment, Conditional, LeafNode, InternalNode, Associate, MultiConditional
 
 from loki.expression.symbols import DeferredTypeSymbol, TypedSymbol, VariableSymbol, Array, Scalar, RangeIndex, Variable, StringLiteral, InlineCall, LogicLiteral, LiteralList
 from loki.frontend.fparser import *
@@ -59,14 +59,14 @@ class MakeSync(Transformation):
 
     def isNpromaOrFieldAPI(self, var):
         base_name = var.name_parts[0]
-
-        # Variables recasted as ARRAY_nD have become scalars ! 
+        # Variables recasted as FIELD_nxx have become scalars ! 
         if isinstance(var, Array) or isinstance(var, Scalar):
             if base_name in self.nproma_vars_names:
-                # If we have passed sections, we are using nproma arrays turned into ARRAY_nD arrays
+                # If we have passed sections, we are using nproma arrays turned into FIELD_nxx arrays
                 # Therefore we have to replace it by its FieldAPI pointer
                 if self.sections:
-                    return True, Variable(name = "F_P", parent = var) #, scope=routine)
+                    #return True, Variable(name = "F_P", parent = var) #, scope=routine)
+                    return True, var #, scope=routine)
 
                 return True, var
 
@@ -100,15 +100,21 @@ class MakeSync(Transformation):
         var_map = {}
         for var in routine.variables:
             if var.name in nproma_list:
+                is_argument = var in routine.arguments
                 new_var = Variable(name=var.name, 
                             type=SymbolAttributes(
                                     DerivedType(name='FIELD_BASIC'), 
-                                    intent='in' if var in routine.arguments else None,
+                                    intent='in' if is_argument else None,
                                     #intent=None,
-                                    pointer=True, polymorphic=True,
+                                    #pointer= True if not is_argument else var.type.pointer,
+                                    #target = var.type.target if is_argument else False,
+                                    pointer = True, # if is_argument else var.type.pointer,
+                                    target = False, # if is_argument else var.type.pointer,
+                                    
+                                    polymorphic=True,
                                     optional=var.type.optional,
                                     # Local variables point to NULL()
-                                    initial=None if var in routine.arguments else InlineCall(DeferredTypeSymbol('NULL'))
+                                    initial=None if is_argument else InlineCall(DeferredTypeSymbol('NULL'))
                                 ),
                             scope = routine
                         )
@@ -151,7 +157,9 @@ class MakeSync(Transformation):
 
 
         elif isinstance(node, Assignment):
+            #print("assing : ", node)
             if node.ptr :
+                print("node ptr : ", node)
                 return([], [], [], [])
             else :
                 writes = [symbol
@@ -172,10 +180,13 @@ class MakeSync(Transformation):
                 
                 static_reads = [r for r in reads if r.name in self.nproma_pointers]
                 static_writes = [w for w in writes if w.name in self.nproma_pointers]
-
+                #print("static reads : ", static_reads)
+                #print("static writes : ", static_writes)
                 reads = [r for r in reads if r not in static_reads]
                 writes = [w for w in writes if w not in static_writes]
 
+                #print("reads : ", reads)
+                #print("writes : ", writes)
                 return (reads, writes, static_reads, static_writes)
 
         elif isinstance(node, Section):
@@ -189,7 +200,6 @@ class MakeSync(Transformation):
 
         elif isinstance(node, Conditional):
 
-            # print("conditional : ", node.condition.type.dtype)
 
             (if_reads, if_writes, *_) = self.findAssigns(node.body)
             (else_reads, else_writes, *_) = self.findAssigns(node.else_body)
@@ -201,10 +211,35 @@ class MakeSync(Transformation):
             all_reads = [r for r in all_reads if r not in all_writes]
 
 
-            # print("all writes : ", all_writes)
+            #print("all writes : ", all_writes)
             self.map_reads[node] = all_reads
             self.map_writes[node] = all_writes
             
+            return(all_reads, all_writes, [], [])
+        elif isinstance(node, MultiConditional):
+            first_body = True
+            for body in node.bodies:
+                (if_reads, if_writes, *_) = self.findAssigns(body)
+                if first_body:
+                    all_writes = if_writes
+                    all_reads = if_reads
+                    first_body = False
+                else:
+                    all_writes = [w for w in if_writes if w in all_writes]
+                    all_reads = [r for r in if_reads if r in all_reads]
+            if node.else_body and node.else_body != ():
+                (else_reads, else_writes, *_) = self.findAssigns(node.else_body)
+                all_writes = [w for w in all_writes if w in else_writes]
+                all_reads = [r for r in all_reads if r in else_reads]
+
+            # writes take precedence over reads
+            all_reads = [r for r in all_reads if r not in all_writes]
+            
+            self.map_reads[node] = all_reads
+            self.map_writes[node] = all_writes
+   
+            #print("all reads ? ", all_reads)
+            #print("all writes ? ", all_writes)
             return(all_reads, all_writes, [], [])
         else :
             # print(f' noeud non traité !!!! {type(node)} {hasattr(node,"body")} ' )
@@ -221,10 +256,15 @@ class MakeSync(Transformation):
             print("no mode for call statement creation !!!")
             exit(1)
 
-        associate_call = InlineCall(function=DeferredTypeSymbol(name='ASSOCIATED'), parameters=(var,) )
+        #print("VAR ?", var, var.type, var.type.pointer)
         sync_call = CallStatement(name = DeferredTypeSymbol(name=call_name, parent = var), arguments=(), scope=None)
+        #if var.type.pointer: 
+        associate_call = InlineCall(function=DeferredTypeSymbol(name='ASSOCIATED'), parameters=(var,) )
         cond = Conditional(condition=associate_call, body = (sync_call,), inline = True)
         return cond
+        #else:
+        #    return sync_call
+
 
     def clearAssigns(self, node, upper_reads, upper_writes):
 
@@ -272,13 +312,15 @@ class MakeSync(Transformation):
         elif isinstance(node, Assignment):
             if not node.ptr :
                 self.map_nodes[node] = None
-            return True
+                return True
+            else:
+                return False
         
         elif isinstance(node, Section):
             return self.clearAssigns(node.body, upper_reads, upper_writes)
         
         elif isinstance(node, Conditional):
-
+            #print("conditional clear : ", node.condition)
             new_writes = [w for w in self.map_writes[node] if w not in upper_writes]
             new_reads = [w for w in self.map_reads[node] if w not in upper_reads and w not in new_writes]
 
@@ -295,6 +337,7 @@ class MakeSync(Transformation):
             empty_else = self.clearAssigns(node.else_body, upper_reads + new_reads, upper_writes + new_writes)
 
             if empty_else and empty_body :
+                print("empty!!!!")
                 self.map_nodes[node] = None            
 
             return (empty_body and empty_else)
@@ -307,7 +350,7 @@ class MakeSync(Transformation):
             return False
 
         else :
-            print(f'noeud non traité !!!! {type(node)} {node} ' )
+            #print(f'noeud non traité !!!! {type(node)} {node} ' )
             return False
 
 
@@ -356,14 +399,16 @@ class MakeSync(Transformation):
                 for arg in call.arguments:
                     if isinstance(arg, Scalar):
                         if is_fieldAPI_ARRAY(arg.type.dtype.name):
-                            args_to_fAPI[arg] = Variable(name = "F_P", parent = arg)
+                            #args_to_fAPI[arg] = Variable(name = "F_P", parent = arg)
+                            args_to_fAPI[arg] = arg
                     elif isinstance(arg,  Array):
                         if is_fieldAPI_ARRAY(arg.type.dtype.name):
-                            args_to_fAPI[arg] = Variable(name = "F_P", parent = arg)
+                            #args_to_fAPI[arg] = Variable(name = "F_P", parent = arg)
+                            args_to_fAPI[arg] = arg
                         elif arg.type.dtype.name == 'FIELD_BASIC' :
-                            print("Field basinc found tavu : ", arg)
-                            args_to_pointers[arg] = arg.clone(dimensions= None)
-                            print("args_tp_ptre : ", args_to_pointers[arg] )
+                            #args_to_pointers[arg] = arg.clone(dimensions= None)
+                            args_to_fAPI[arg] = arg.clone(dimensions= None)
+                            #print("args_tp_ptre : ", args_to_pointers[arg] )
                         elif arg.type.dtype.name != 'FIELD_BASIC' :
                             print('array not FIELD_BASIC or FIELD_nxx_ARRAY passed to subroutine !!!!!', arg, arg.type.dtype.name )
 
@@ -375,14 +420,15 @@ class MakeSync(Transformation):
                 if args_to_fAPI or args_to_pointers :
                     assignments = []
                     count = 0
-                    for arg in args_to_fAPI:
-                        args_to_pointers[arg] = Variable(name=f'YLFLDPTR{count}', scope=routine)
-                        assignments.append(Assignment(  lhs = args_to_pointers[arg], 
-                                                        rhs = args_to_fAPI[arg], 
-                                                        ptr = True))
-                        count = count + 1
+                    #for arg in args_to_fAPI:
+                    #    args_to_pointers[arg] = Variable(name=f'YLFLDPTR{count}', scope=routine)
+                    #    assignments.append(Assignment(  lhs = args_to_pointers[arg], 
+                    #                                    rhs = args_to_fAPI[arg], 
+                    #                                    ptr = True))
+                    #    count = count + 1
                     self.total_FAPI_pointers = max(count, self.total_FAPI_pointers)
-                    new_call = call.clone(arguments = SubstituteExpressions(args_to_pointers).visit(call.arguments))
+                    #new_call = call.clone(arguments = SubstituteExpressions(args_to_pointers).visit(call.arguments))
+                    new_call = call.clone(arguments = SubstituteExpressions(args_to_fAPI).visit(call.arguments))
                     calls_map[call] = tuple(assignments) + (new_call,)
 
         # Add the required numbers of FIELD_BASIC pointers if there are no sections (full routine transformation)
@@ -439,6 +485,9 @@ class MakeSync(Transformation):
             (top_reads, top_writes, *_) = self.findAssigns(routine.body)
 
         top_reads = [r for r in top_reads if r not in top_writes]
+
+        #print("top_reads : ", top_reads)
+        #print("top_writes : ", top_writes)
 
         # Second step : top-down traversal of the section
         # This step inserts sync calls for variables at the highest level (identified in first step)
