@@ -482,14 +482,16 @@ class MakeParallel(Transformation):
                 self.addTransform(subroutine, 'SCC_'+target.upper())
             return new_region
         else:
+            # We have to create a complete subroutine to apply the SCC transformation
             new_subroutine = routine.clone( name = routine.name + "_PARALLEL_" + str(region_num), 
                                             body = region.body,
                                             spec = routine.spec.clone(),
                                             contains = None)
 
             add_suffix_transform = AddSuffixToCalls(  suffix=('_SCC_'+target.upper()), additional_variables=['YDSTACK=YLSTACK'] ) 
-            new_subroutine.apply(add_suffix_transform)
-            
+            # Apply this transformation as a node, since we want to update imports in the complete routine
+            new_subroutine = add_suffix_transform.transform_node(new_subroutine, routine)
+
             for call in FindNodes(CallStatement).visit(new_subroutine.body):
                 ReplaceArguments(call, {'YDCPG_BNDS%KIDIA':Variable(name='KIDIA', parent = local_boundary_variable), \
                                         'YDCPG_BNDS%KFDIA':Variable(name='KFDIA', parent = local_boundary_variable)})
