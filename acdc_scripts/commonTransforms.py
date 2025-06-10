@@ -113,18 +113,12 @@ class RemovePragmaRegions(Transformation):
 class ReplaceAbortRegions(Transformation):
     def __init__(self, abort_call = True):
         self.abort_call = abort_call 
-        print("init ", abort_call , self.abort_call)
     def transform_subroutine(self, routine, **kwargs):
         regions_map = {}
         for region in FindNodes(PragmaRegion).visit(routine.body):
-            print("region fouind : ", region.pragma, region.body)
-            for node in region.body:
-                print('node : ', node)
             if ('ABORT' in region.pragma.content):
-                print("abort it is !", self.abort_call)
                 # If abort_call is set to false, we will blindly erase the region
                 if not self.abort_call :
-                    print("not abort_call tavu !")
                     regions_map[region] = None
                 # If the ABORT directive has a KEEPME clause, we keep itscontent
                 elif ('KEEPME' in region.pragma.content):
@@ -139,7 +133,6 @@ class ReplaceAbortRegions(Transformation):
             elif ('KEEPME' in region.pragma.content):
                 regions_map[region] = region.body
 
-        print("Regiobn map ? ", regions_map)
         routine.body = Transformer(regions_map).visit(routine.body)
 
 
@@ -178,7 +171,6 @@ class AddSuffixToCalls(Transformation):
                     list_arguments[0] = StringLiteral(list_arguments[0].value + self.suffix)
                     call_map[call] = call.clone(arguments = tuple(list_arguments) )
                 elif call.name not in containedNames:
-                    print("call foudn ", call.name)
                     new_args = call.arguments
                     new_kwargs = call.kwarguments
 
@@ -196,6 +188,7 @@ class AddSuffixToCalls(Transformation):
                     calls_names.add(new_call_name.lower())
 
         # Update includes : check if they are not already imported
+        
         treated_calls = []
         for imp in FindNodes(Import).visit(routine.spec):
             if imp.c_import:
@@ -206,6 +199,7 @@ class AddSuffixToCalls(Transformation):
         for call in calls_names:
             if call not in treated_calls:
                 routine.spec.append(Import(module=call + '.intfb.h', c_import = True))
+        
 
 
         if inplace:
