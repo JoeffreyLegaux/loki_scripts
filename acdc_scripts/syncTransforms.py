@@ -450,9 +450,13 @@ class MakeSync(Transformation):
 
         # We might end up with a condition with has_elseif attribute but without else_body.
         # This crashes reconstruction of the node, so we preventively eliminate all those attributes.
+        # Also remove inlining to prevent further issues when inserting inline ASSOCIATED inside 
+        # already inlines conditional
         for cond in FindNodes(Conditional).visit(routine.body):
             if cond.has_elseif:
                 cond._update(has_elseif = False)
+            if cond.inline:
+                cond._update(inline=False)
 
         # There might be FieldAPI variables in conditions, we will assume worst case
         # and systematically evaluate to true
@@ -512,12 +516,15 @@ class MakeSync(Transformation):
 
         # Remove inlining from conditionnals that contain more than one statement        
         cond_map = {}
-        for cond in FindNodes(Conditional).visit(routine.body):
-            if cond.inline: 
-                if ( (cond.body and len(cond.body) > 1) or 
-                    (cond.else_body and len(cond.else_body) > 1 ) ):
-                    cond_map[cond] = cond.clone(inline=False)
-        routine.body = Transformer(cond_map).visit(routine.body)
+        #for cond in FindNodes(Conditional).visit(routine.body):
+        #    if cond.inline: 
+                
+                #!if ( (cond.body and len(cond.body) > 1) or 
+                #    (cond.else_body and len(cond.else_body) > 1 ) ):
+                 
+                #cond_map[cond] = cond.clone(inline=False)
+                #cond._update(inline=False)
+        #routine.body = Transformer(cond_map).visit(routine.body)
 
 
 
