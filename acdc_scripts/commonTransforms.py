@@ -5,7 +5,7 @@ from loki.ir import Section, Comment, CommentBlock, VariableDeclaration, Pragma,
 
 from loki.transformations import inline_member_procedures
 
-from loki.expression.symbols import DeferredTypeSymbol, TypedSymbol, Array, Scalar, RangeIndex, Variable, StringLiteral, InlineCall, LogicLiteral, LiteralList
+from loki.expression.symbols import DeferredTypeSymbol, TypedSymbol, Array, Scalar, RangeIndex, Variable, StringLiteral, InlineCall, LogicLiteral, LiteralList, Literal
 from loki.expression import symbolic
 from loki.frontend.fparser import *
 from loki.logging import info, error
@@ -22,8 +22,7 @@ def ReplaceArguments(node, args_dict):
     assert hasattr(node, "arguments") 
     new_args = ()
     for arg in node.arguments:
-        if arg.name in args_dict:
-            #new_args += (arg.clone(name = args_dict[arg.name]),)
+        if hasattr(arg, "name") and arg.name in args_dict:
             new_args += (args_dict[arg.name],)
         else:
             new_args += (arg,)
