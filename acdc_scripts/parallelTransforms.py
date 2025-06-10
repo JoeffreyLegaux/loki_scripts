@@ -466,33 +466,51 @@ class MakeParallel(Transformation):
                         return False 
         return True
 
-    def makeParallelSubroutine(self, routine, region, region_num, scc, target='host'):
+    def makeParallelSubroutine(self, routine, region, region_num, local_boundary_variable, scc, target='host') :
         print("make parallel subroutine : ", routine, target, region)
-        new_subroutine = routine.clone( name = routine.name + "_PARALLEL_" + str(region_num), 
-                                                body = region.body,
-                                                spec = routine.spec.clone(),
-                                                contains = None)
+        # Optimisation : when a block only contains calls, simply transform the calls
+        if self.containsOnlyCalls(region):
+            new_region = FieldAPIPtr(pointerType='host').transform_node(region, routine)
+            add_suffix_transform = AddSuffixToCalls(suffix=('_SCC_'+target.upper()), additional_variables=['YDSTACK=YLSTACK'] )
+            new_region = add_suffix_transform.transform_node(new_region, routine)
+                
+            for call in FindNodes(CallStatement).visit(new_region.body):
+                ReplaceArguments(call, {'YDCPG_BNDS%KIDIA':Variable(name='KIDIA', parent = local_boundary_variable), \
+                                        'YDCPG_BNDS%KFDIA':Variable(name='KFDIA', parent = local_boundary_variable)})
+      
+            for subroutine in add_suffix_transform.routines_called:
+                self.addTransform(subroutine, 'SCC_'+target.upper())
+            return new_region
+        else:
+            new_subroutine = routine.clone( name = routine.name + "_PARALLEL_" + str(region_num), 
+                                            body = region.body,
+                                            spec = routine.spec.clone(),
+                                            contains = None)
 
-        add_suffix_transform = AddSuffixToCalls(  suffix=('_SCC'), additional_variables=['YDSTACK=YLSTACK'] ) 
-        new_subroutine.apply(add_suffix_transform)
-        for subroutine in add_suffix_transform.routines_called:
-            self.addTransform(subroutine, 'SCC_'+target.upper())
+            add_suffix_transform = AddSuffixToCalls(  suffix=('_SCC_'+target.upper()), additional_variables=['YDSTACK=YLSTACK'] ) 
+            new_subroutine.apply(add_suffix_transform)
+            
+            for call in FindNodes(CallStatement).visit(new_subroutine.body):
+                ReplaceArguments(call, {'YDCPG_BNDS%KIDIA':Variable(name='KIDIA', parent = local_boundary_variable), \
+                                        'YDCPG_BNDS%KFDIA':Variable(name='KFDIA', parent = local_boundary_variable)})
 
-        new_subroutine.apply(RemoveUnusedImports())
-        if scc:
-            true_symbols, false_symbols=logical_lst.symbols()
-            false_symbols.append('LHOOK')
+            for subroutine in add_suffix_transform.routines_called:
+                self.addTransform(subroutine, 'SCC_'+target.upper())
 
-            prefixed_FieldAPI_pointers = {'YL_'+key:value for key,value in self.FieldAPI_pointers.items()}
-            #prefixed_FieldAPI_pointers['YLCPG_BNDS%KIDIA'] = 'YDCPG_BNDS%KIDIA'
+            new_subroutine.apply(RemoveUnusedImports())
+            if scc:
+                true_symbols, false_symbols=logical_lst.symbols()
+                false_symbols.append('LHOOK')
 
-            scc_transform_routine(new_subroutine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols, FieldAPI_pointers=prefixed_FieldAPI_pointers, is_node=True)
+                prefixed_FieldAPI_pointers = {'YL_'+key:value for key,value in self.FieldAPI_pointers.items()}
 
-        new_subroutine.apply(RemoveComments())
-        new_subroutine.apply(RemovePragmas())
-        new_subroutine.apply(FieldAPIPtr(pointerType=target))  
+                scc_transform_routine(new_subroutine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols, FieldAPI_pointers=prefixed_FieldAPI_pointers, is_node=True)
+
+            new_subroutine.apply(RemoveComments())
+            new_subroutine.apply(RemovePragmas())
+            new_subroutine.apply(FieldAPIPtr(pointerType=target))  
         
-        return new_subroutine.body
+            return new_subroutine.body
         # self.outlined_routines.append(new_subroutine)
 
 
@@ -626,42 +644,12 @@ class MakeParallel(Transformation):
                     new_body = (call_sync, new_loop,)
 
                 elif (target == 'OpenMPSingleColumn'):
-                    # Check for outline necessity : if region only contains calls, directly call SCC variants
-                    # Otherwise, create a contained subroutine with the transformed region
-                    if self.containsOnlyCalls(region):
-                        new_region = FieldAPIPtr(pointerType='host').transform_node(region, routine)
-                        add_suffix_transform = AddSuffixToCalls(suffix=('_SCC_HOST'), additional_variables=['YDSTACK=YLSTACK'] )
-                        new_region = add_suffix_transform.transform_node(new_region, routine)
-
-                        for call in FindNodes(CallStatement).visit(new_region.body):
-                            ReplaceArguments(call, {'YDCPG_BNDS%KIDIA':Variable(name='KIDIA', parent = local_boundary_variable), \
-                                                    'YDCPG_BNDS%KFDIA':Variable(name='KFDIA', parent = local_boundary_variable)})
-
-                        for subroutine in add_suffix_transform.routines_called:
-                            self.addTransform(subroutine, 'SCC_HOST')
-                    else:
-                        new_region = self.makeParallelSubroutine(routine, region, region_num, scc=True, target='host')
-                        
-
-
+                    new_region = self.makeParallelSubroutine(routine, region, region_num, local_boundary_variable, scc=True, target='host')
                     new_loop = self.makeOpenMPSCCLoop(routine, local_boundary_variable, new_region)
                     new_body = (call_sync, new_loop,)                    
                 
                 elif (target == 'OpenACCSingleColumn'):
-                    if self.containsOnlyCalls(region):
-                        new_region = FieldAPIPtr(pointerType='device').transform_node(region, routine)
-
-                        add_suffix_transform = AddSuffixToCalls(  suffix=('_SCC_DEVICE'), additional_variables=['YDSTACK=YLSTACK'] )
-                        new_region = add_suffix_transform.transform_node(new_region, routine)
-                        for call in FindNodes(CallStatement).visit(new_region.body):
-                            ReplaceArguments(call, {'YDCPG_BNDS%KIDIA':Variable(name='KIDIA', parent = local_boundary_variable), \
-                                                    'YDCPG_BNDS%KFDIA':Variable(name='KFDIA', parent = local_boundary_variable)})
-
-                        for subroutine in add_suffix_transform.routines_called:
-                            self.addTransform(subroutine, 'SCC_DEVICE')
-                    else:
-                        new_region = self.makeParallelSubroutine(routine, region, region_num, scc=True, target='device')
-                    
+                    new_region = self.makeParallelSubroutine(routine, region, region_num, local_boundary_variable, scc=True, target='device')
                     new_loop = self.makeOpenACCSCCLoop(routine, local_boundary_variable, new_region)
                     new_body = (call_sync, new_loop,)                    
                 else :
