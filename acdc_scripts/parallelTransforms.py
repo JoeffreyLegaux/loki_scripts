@@ -470,7 +470,7 @@ class MakeParallel(Transformation):
         print("make parallel subroutine : ", routine, target, region)
         # Optimisation : when a block only contains calls, simply transform the calls
         if self.containsOnlyCalls(region):
-            new_region = FieldAPIPtr(pointerType='host').transform_node(region, routine)
+            new_region = FieldAPIPtr(pointerType=target).transform_node(region, routine)
             add_suffix_transform = AddSuffixToCalls(suffix=('_SCC_'+target.upper()), additional_variables=['YDSTACK=YLSTACK'] )
             new_region = add_suffix_transform.transform_node(new_region, routine)
                 
