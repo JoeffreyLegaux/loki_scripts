@@ -103,6 +103,88 @@ def get_pointers_to_FieldAPI(routine, nproma_variables):
     return (FieldAPI_ptrs_dims, FieldAPI_ptrs_vars)
 
 
+def nproma_to_FieldAPI(routine, FieldAPI_pointers):
+        """
+        Search nproma-sized arrays (from params.nproma_aliases),
+        transforms them into relevant FIELD_NXX type,
+        return the new arrays names along their new dimensions
+        """
+        arguments_map = {}
+        nproma_arrays_map = {}
+        nproma_names_map = {}
+        nproma_arrays_dimensions = {}
+        locals_dimensions = {}
+        
+        arrays_types_dimensions = set()
+
+        field_new_calls = ()
+        field_delete_calls = ()
+
+        for var in FindVariables().visit(routine.spec):
+
+            if isinstance(var, Array):
+
+                is_FAPI_pointer = var.name in FieldAPI_pointers
+
+                is_nproma = False
+                if not is_FAPI_pointer :
+                    firstdim = var.dimensions[0] 
+                
+                    #Naively considering ranges with (xxx:nproma) are nproma-sized
+                    if isinstance(firstdim, RangeIndex):
+                        firstdim = firstdim.upper
+
+                    is_nproma = firstdim in params.nproma_aliases
+                
+                if is_FAPI_pointer or is_nproma:
+
+                    is_argument = var in routine.arguments
+                
+                    #print("variable to FAPI : ", var, type(var))
+                    #print("type : ", type(var.type.kind.name))
+
+                    array_type_dim = f'{len(var.dimensions)+1}{var.type.kind.name[-2:]}'
+
+
+                    arrays_types_dimensions.add(array_type_dim)
+                        
+                    new_var = Variable(     name=f'Y{("D" if is_argument else "L")}_{var.name}', 
+                                            type=var.type.clone(dtype=DerivedType(name=f'FIELD_{array_type_dim}'),
+                                                                kind=None, 
+                                                                # Abstract types require polymorphism
+                                                                polymorphic=True, 
+                                                                # Dummy arrays can stay target, local arrays have to become
+                                                                # pointers which conflict with target attribute
+                                                                target = False,
+                                                                pointer = True
+                                                                )
+                                    )
+
+                    nproma_arrays_map[var] = new_var
+                    nproma_names_map[var.name] = new_var
+                    nproma_arrays_dimensions[var.name] = var.dimensions
+
+        routine.spec = SubstituteExpressions(nproma_arrays_map).visit(routine.spec)
+        
+        # Updates routine signature with new arguments through the _dummies property
+        dummies_list = list(routine._dummies)
+        for index, dummy in enumerate(dummies_list):
+            if dummy.upper() in nproma_names_map:
+                dummies_list[index] = nproma_names_map[dummy.upper()].name
+        
+        routine._dummies = tuple(dummies_list)
+
+        body_vars_map={}
+        for var in FindVariables().visit(routine.body):
+            if isinstance(var, Array):
+                if var.name in nproma_names_map:
+                    new_var = nproma_names_map[var.name]
+                    body_vars_map[var] = new_var.clone(dimensions = var.dimensions)
+
+        routine.body = SubstituteExpressions(body_vars_map).visit(routine.body)
+
+        return None
+
 class FieldAPIPtr(Transformation):
     def __init__(self, pointerType='host'):
         if (pointerType == 'host') :
