@@ -83,7 +83,18 @@ class FindNodesOutsidePragmaRegion(FindNodes):
 #        existing_modules = []
 #        for imp in FindNodes(Import).visit(routine.spec):
 
-
+class SplitArraysDeclarations(Transformation):
+    def transform_subroutine(self, routine, **kwargs):
+        decls_map = {}
+        for decls in FindNodes(VariableDeclaration).visit(routine.spec):
+            if len(decls.symbols) > 1:
+                if any(isinstance(s, Array) for s in decls.symbols):
+                    print("moultidecl array !!!", decls)
+                    split_decls = ()
+                    for s in decls.symbols:
+                        split_decls += (VariableDeclaration((s,)),)
+                    decls_map[decls] = split_decls
+        routine.spec = Transformer(decls_map).visit(routine.spec)
 
 class RemovePragmas(Transformation):
     def transform_subroutine(self, routine, **kwargs):
