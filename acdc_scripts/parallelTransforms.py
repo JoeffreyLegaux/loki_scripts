@@ -12,7 +12,7 @@ from storable import retrieve
 
 from syncTransforms import MakeSync, addFieldAPIPointers
 
-from fieldAPITransforms import FieldAPIPtr, get_fieldAPI_variables, get_fieldAPI_member
+from fieldAPITransforms import FieldAPIPtr, get_fieldAPI_variables, get_fieldAPI_member, is_fieldAPI_ARRAY
 from commonTransforms import InlineMemberCalls, RemoveComments, RemovePragmas, RemovePragmaRegions, RemoveEmptyConditionals, \
                                 AddSuffixToCalls, RemoveLoops, RemoveUnusedVariables, AddACCRoutineDirectives, \
                                 RemoveUnusedImports, FindNodesOutsidePragmaRegion, ReplaceArguments
@@ -552,6 +552,7 @@ class MakeParallel(Transformation):
 
             call._update(kwarguments = new_kwargs)
 
+
             # If array view are passed as arguments, change them into their FieldAPI counterpart
             new_args=()
             updated_args = False
@@ -629,9 +630,32 @@ class MakeParallel(Transformation):
             for call in FindNodes(CallStatement).visit(region.body):
                 print("call in region : ", call)
                 self.addTransform(call.name.name, 'ABORT')
-                abort_calls += (call.clone(name= DeferredTypeSymbol(name=f'{call.name}_ABORT')),)
-            
 
+
+                # Adjust arguments : variables turned into fieldAPI should now pass their PTR
+                to_update = False
+                abort_call = call.clone(name= DeferredTypeSymbol(name=f'{call.name}_ABORT'))
+                new_args = ()
+                for arg in abort_call.arguments:
+                    if hasattr(arg, "type") and is_fieldAPI_ARRAY(arg.type.dtype.name):
+                        new_args += (Variable(name='PTR', parent = arg, scope=routine),)
+                        to_update = True
+                    else:
+                        new_args += (arg,)
+                new_kwargs = ()
+                for couple in abort_call.kwarguments:
+                    if hasattr(couple[1], "type") and  is_fieldAPI_ARRAY(couple[1].type.dtype.name):
+                        new_kwargs += ((couple[0], Variable(name='PTR', parent=couple[1], scope=routine)) ,)
+                        to_update = True
+                    else:
+                        new_kwargs += ((couple[0], couple[1]),)
+
+                if to_update:
+                    abort_call._update(arguments = new_args)
+                    abort_call._update(kwarguments = new_kwargs)
+
+                abort_calls += (abort_call,)
+            
             
             for index,target in enumerate(targets):
 
