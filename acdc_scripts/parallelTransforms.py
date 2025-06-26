@@ -418,7 +418,7 @@ class MakeParallel(Transformation):
 
         return columns_loop
 
-    def makeRegionSyncCall(self, routine, target, region_num, body, spec, nproma_arrays):
+    def makeSyncRegion(self, routine, target, region_num, body, spec, nproma_arrays):
         # Create synchronisation call 
         # building a subroutine that contains only the current region
         # Apply the Makesync transformation, then append it as a member routine
@@ -617,11 +617,11 @@ class MakeParallel(Transformation):
             #Generate sync subroutines for [HOST, DEVICE]
             sync_names = [None, None]
             if archs[0]:
-                (sync_names[0], sync_FAPI_pointers) = self.makeRegionSyncCall(routine, 'HOST', region_num, region.body, unmodified_spec, nproma_arrays)
+                (sync_names[0], sync_FAPI_pointers) = self.makeSyncRegion(routine, 'HOST', region_num, region.body, unmodified_spec, nproma_arrays)
                 # We keep the maximum amount of local pointers needed to pass FieldAPI variables to Sync subroutines
                 total_FAPI_pointers = max (total_FAPI_pointers, sync_FAPI_pointers)
             if archs[1]:
-                (sync_names[1], sync_FAPI_pointers) = self.makeRegionSyncCall(routine, 'DEVICE', region_num, region.body, unmodified_spec, nproma_arrays)
+                (sync_names[1], sync_FAPI_pointers) = self.makeSyncRegion(routine, 'DEVICE', region_num, region.body, unmodified_spec, nproma_arrays)
                 total_FAPI_pointers = max (total_FAPI_pointers, sync_FAPI_pointers)
 
             print("sync_names ? ", sync_names)
