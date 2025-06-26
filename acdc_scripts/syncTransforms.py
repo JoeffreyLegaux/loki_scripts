@@ -3,7 +3,7 @@ from loki import (Frontend, Sourcefile, FindNodes, Loop, Node, Intrinsic, Subrou
 
 from loki.ir import Section, Comment, CommentBlock, VariableDeclaration, Pragma, Import, Assignment, Conditional, LeafNode, InternalNode, Associate, MultiConditional
 
-from loki.expression.symbols import DeferredTypeSymbol, TypedSymbol, VariableSymbol, Array, Scalar, RangeIndex, Variable, StringLiteral, InlineCall, LogicLiteral, LiteralList
+from loki.expression.symbols import DeferredTypeSymbol, TypedSymbol, VariableSymbol, Array, Scalar, RangeIndex, Variable, StringLiteral, InlineCall, LogicLiteral, LogicalNot, LiteralList
 from loki.frontend.fparser import *
 from loki.logging import info, error
 from loki.analyse import *
@@ -389,6 +389,7 @@ class MakeSync(Transformation):
         # The replacement of variable usage with SYNC calls would erase the added pointers association,
         # so here we only build the map which will be applied later.
 
+        fAPI_arrays = set()
         calls_map = {}
         total_FAPI_pointers = 0
         for call in FindNodes(CallStatement).visit(routine.body):
@@ -416,7 +417,8 @@ class MakeSync(Transformation):
                         fAPI_member = self.get_fieldAPI_member(arg)
                         if fAPI_member :
                             args_to_fAPI[arg] = Variable(name = fAPI_member[0], parent=arg.parent, scope=routine)
-                        
+                            fAPI_arrays.add((args_to_fAPI[arg], fAPI_member[1] ) )
+                
                 if args_to_fAPI or args_to_pointers :
                     assignments = []
                     count = 0
@@ -430,7 +432,7 @@ class MakeSync(Transformation):
                     #new_call = call.clone(arguments = SubstituteExpressions(args_to_pointers).visit(call.arguments))
                     new_call = call.clone(arguments = SubstituteExpressions(args_to_fAPI).visit(call.arguments))
                     calls_map[call] = tuple(assignments) + (new_call,)
-
+ 
         # Add the required numbers of FIELD_BASIC pointers if there are no sections (full routine transformation)
         # If sections are present, the main transformation process will retrieve the # of pointers
         if not self.sections:
@@ -482,6 +484,7 @@ class MakeSync(Transformation):
 
         # Initiate the data analysis process with loki built-in function
         map = {}
+        
         with dataflow_analysis_attached(routine) :
             # First step : bottom-up traversal of the section
             # This step recursively propagates upwards variables read and writes when they
@@ -532,7 +535,16 @@ class MakeSync(Transformation):
         # Transform the subroutine calls arguments into FIELD_BASIC pointers when relevant
         routine.body = Transformer(calls_map).visit(routine.body)
 
-
+        for (array,size) in fAPI_arrays:
+            bounds_kwargs = ( ( 'UBOUNDS', LiteralList(tuple([1 for s in range(size+1)])) ),)
+            field_new_call = CallStatement( name = DeferredTypeSymbol(name='FIELD_NEW'),
+                                            arguments = array,
+                                            kwarguments = bounds_kwargs + (('PERSISTENT', LogicLiteral(True)), ),
+                                            scope=routine
+                                           )
+            associate_call = InlineCall(function=DeferredTypeSymbol(name='ASSOCIATED'), 
+                                        parameters=(array,) )
+            cond = Conditional(condition=LogicalNot(associate_call), body = (field_new_call,), inline = True)
+ 
+            routine.body.append(cond)
             
-            
-        
