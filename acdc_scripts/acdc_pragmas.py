@@ -43,12 +43,13 @@ else:
 
 
 #Importing local transformation classes
-from fieldAPITransforms import FieldAPIPtr, get_pointers_to_FieldAPI
+from fieldAPITransforms import FieldAPIPtr, get_pointers_to_FieldAPI, nproma_to_FieldAPI
 from arpege_parameters import params
 from syncTransforms import MakeSync
 from parallelTransforms import MakeParallel
-from commonTransforms import (RemovePragmas, RemovePragmaRegions, RemoveAssignments, ReplaceAbortRegions, 
-    AddSuffixToCalls, InlineMemberCalls, RemoveComments, RemoveLoops, RemoveEmptyConditionals, AddACCRoutineDirectives )
+from commonTransforms import (SplitArraysDeclarations, RemovePragmas, RemovePragmaRegions, 
+        RemoveAssignments, ReplaceAbortRegions, AddSuffixToCalls, InlineMemberCalls, RemoveComments, 
+        RemoveLoops, RemoveEmptyConditionals, AddACCRoutineDirectives )
 
 
 
@@ -110,20 +111,23 @@ output_path_interfaces = output_path + 'ifsaux/loki_interfaces/'
 
 # Start at CPG_DYN_SLG with empty list of forced transformations
 
+routines_to_transform = {}
 #routines_to_transform = {'CPG_DYN_SLG':{'PARALLEL'},}
-#routines_to_transform = {'LACDYN':{'PARALLEL', 'ABORT'},}
-#routines_to_transform = {'VERINT':{'SCC_DEVICE'},}
-#routines_to_transform = {'VERDISINT':{'ABORT'},}
-#routines_to_transform = {'SIGAM_GP':{'ABORT'},}
-#routines_to_transform = {'GPRCP_EXPL':{'PARALLEL'},}
+routines_to_transform['LACDYN'] ={'PARALLEL', 'ABORT'}
 #routines_to_transform = {'GPRCP_EXPL':{'SCC_DEVICE'},}
-routines_to_transform = {'LAVENT':{'ABORT','PARALLEL'},}
-#routines_to_transform = {'LASSIE':{'SYNC_DEVICE'},}
+#routines_to_transform['LASSIE']={'ABORT','PARALLEL'}
+#routines_to_transform['LAVENT']={'ABORT','PARALLEL'}
+#routines_to_transform['LAVABO']={'ABORT','PARALLEL'}
+#routines_to_transform['LASURE'] = {'SCC_HOST','SCC_DEVICE'}
+#routines_to_transform['LATTES']={'ABORT','PARALLEL'}
+#routines_to_transform['LATTEX']={'ABORT','PARALLEL'}
+#routines_to_transform['LATTEX']={'ABORT','PARALLEL'}
+#routines_to_transform = {'VERDISINT':{'ABORT'}}
 treated_routines = {}
 
 # If set to False, only apply transformation listed in routines_to_transform
 # If set to True, enqueue subroutines called during a transformation for further transformation
-recursive_process = True #False #True
+greedy_process = True #False #True
 
 while (len(routines_to_transform) > 0):
     routine =  next(iter(routines_to_transform))
@@ -228,7 +232,7 @@ while (len(routines_to_transform) > 0):
                     add_suffix_transform =(AddSuffixToCalls(suffix='_'+transform, additional_kwvariables=[('YDSTACK','YLSTACK')]))
                     new_routine.apply(add_suffix_transform)
                     
-                    if recursive_process:
+                    if greedy_process:
                         for subroutine in add_suffix_transform.routines_called:
                             add_to_transforms(subroutine, {transform})
 
@@ -274,7 +278,7 @@ while (len(routines_to_transform) > 0):
                 new_routine.apply(add_suffix_transform)
                 print("after add suffix")
                 
-                if recursive_process:
+                if greedy_process:
                     for subroutine in add_suffix_transform.routines_called:
                         add_to_transforms(subroutine, {transform})
 
@@ -300,7 +304,7 @@ while (len(routines_to_transform) > 0):
             f.close()
 
 
-        elif (transform == 'ABORT'):
+        elif (transform == 'ABORT' and routine not in params.ignore_abort):
             print(f'call {transform} ')
             print("====_____________================______________================______________=================")
             #filename = output_path + file[:-4] + '_abort.F90'
@@ -314,17 +318,18 @@ while (len(routines_to_transform) > 0):
                 new_routine.apply(RemoveLoops())
                 new_routine.apply(RemoveAssignments())                
                 new_routine.apply(ReplaceAbortRegions())
-                
+               
                 add_suffix_transform = AddSuffixToCalls(suffix='_ABORT')
                 new_routine.apply(add_suffix_transform)
             
-
                 new_routine.apply(RemovePragmas())
                 new_routine.apply(RemovePragmaRegions())
                 new_routine.apply(RemoveComments())
                 new_routine.apply(RemoveEmptyConditionals())
 
-                if recursive_process:
+                #nproma_to_FieldAPI(new_routine, FieldAPI_pointers_names)
+
+                if greedy_process:
                     for subroutine in add_suffix_transform.routines_called:
                         add_to_transforms(subroutine, {'ABORT'})
 
@@ -364,7 +369,7 @@ while (len(routines_to_transform) > 0):
                 # We probably will have for new routines 'PARALLEL' 'SYNC' and 'ABORT' transforms to add
                 print("treated routines : ", treated_routines)
                 
-                if recursive_process:
+                if greedy_process:
                     for subroutine in parallel_transform.subroutines_to_transform:
                         add_to_transforms(subroutine, parallel_transform.subroutines_to_transform[subroutine])
                         print("added transfo ", subroutine, parallel_transform.subroutines_to_transform[subroutine])
