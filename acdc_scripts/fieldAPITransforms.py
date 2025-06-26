@@ -182,6 +182,8 @@ def nproma_to_FieldAPI(routine, FieldAPI_pointers):
                     body_vars_map[var] = new_var.clone(dimensions = var.dimensions)
 
         routine.body = SubstituteExpressions(body_vars_map).visit(routine.body)
+    
+        routine.spec.prepend(Import(module="FIELD_MODULE"))
 
         return None
 
