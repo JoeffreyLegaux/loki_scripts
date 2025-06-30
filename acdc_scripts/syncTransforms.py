@@ -547,4 +547,7 @@ class MakeSync(Transformation):
             cond = Conditional(condition=LogicalNot(associate_call), body = (field_new_call,), inline = True)
  
             routine.body.append(cond)
-            
+       
+        # We need FIELD_FACTORY_MODULE for FIELD_NEW
+        if (len(fAPI_arrays) > 0):
+            routine.spec.prepend(Import(module="FIELD_FACTORY_MODULE"))     
