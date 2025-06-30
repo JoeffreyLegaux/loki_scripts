@@ -630,7 +630,7 @@ class MakeParallel(Transformation):
             for call in FindNodes(CallStatement).visit(region.body):
                 print("call in region : ", call)
                 if call.name not in params.ignore_abort:
-                
+                    self.addTransform(call.name.name, 'ABORT')
                     # Adjust arguments : variables turned into fieldAPI should now pass their PTR
                     to_update = False
                     abort_call = call.clone() #name= DeferredTypeSymbol(name=f'{call.name}_ABORT'))
@@ -654,7 +654,7 @@ class MakeParallel(Transformation):
                         abort_call._update(kwarguments = new_kwargs)
 
                     abort_calls += (abort_call,)
-           
+
             abort_calls = Section(abort_calls)
             transform = AddSuffixToCalls(suffix='_ABORT')
             abort_calls = transform.transform_node(abort_calls, routine)
