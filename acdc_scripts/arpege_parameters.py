@@ -5,7 +5,7 @@ from storable import retrieve
 @dataclass
 class params_class:
   nproma_aliases = ["KLON","YDCPG_OPTS%KLON","YDGEOMETRY%YRDIM%NPROMNH","YDGEOMETRY%YRDIM%NPROMA","KPROMA", "YDDIM%NPROMA", "NPROMA","KSYS"]
-  nproma_bounds = [["KIDIA", "YDCPG_BNDS%KIDIA","KST"],["KFDIA", "YDCPG_BNDS%KFDIA","KEND"]]
+  nproma_bounds = [["KIDIA", "YDCPG_BNDS%KIDIA","KST","KFIRST"],["KFDIA", "YDCPG_BNDS%KFDIA","KEND"]]
   nproma_loop_indices = ['JLON','JROF']
   cpg_opts_variable = 'YDCPG_OPTS'
   block_dimension = 'YDCPG_OPTS%KGPBLKS'
@@ -13,7 +13,8 @@ class params_class:
   boundaries_type = 'CPG_BNDS_TYPE'
   ignored_subroutines = ['ABOR1','GETENV','DGEMM','INIT','FINAL']
   ignore_abort = ['LATTEX_DNT', 'LATTEX_TNT']
-  routines_to_files = { 'CPG_DYN_SLG':'main/arpifs/adiab/cpg_dyn_slg.F90', 
+  routines_to_files = { #'CPG_DYN_SLG':'main/arpifs/adiab/cpg_dyn_slg.F90', 
+                        'CPG_DYN_SLG':'local/arpifs/adiab/cpg_dyn_slg.F90', 
                         'LACDYN':'main/arpifs/adiab/lacdyn.F90',
                         #'LACDYN':'local/arpifs/adiab/lacdyn.F90',
                         'LAVABO':'main/arpifs/adiab/lavabo.F90',
@@ -33,7 +34,8 @@ class params_class:
                         'LAVABO_EXPL_LAITVSPCQM_PART1':'main/arpifs/adiab/lavabo_expl_laitvspcqm_part1.F90',
                         'LAVABO_EXPL_LAITVSPCQM_PART2':'main/arpifs/adiab/lavabo_expl_laitvspcqm_part2.F90',
                         'LATTEX_EXPL_2TL':'main/arpifs/adiab/lattex_expl_2tl.F90',
-                        'LATTEX_EXPL_VSPLTRANS':'main/arpifs/adiab/lattex_expl_vspltrans.F90',
+                        #'LATTEX_EXPL_VSPLTRANS':'main/arpifs/adiab/lattex_expl_vspltrans.F90',
+                        'LATTEX_EXPL_VSPLTRANS':'local/arpifs/adiab/lattex_expl_vspltrans.F90',
                         'LOCAL2CARTGEOV':'main/arpifs/adiab/local2cartgeov.F90',
                         'TRIDIA':'main/algor/external/linalg/tridia.F90',
                         #'VERDISINT':'main/arpifs/utility/verdisint.F90',
