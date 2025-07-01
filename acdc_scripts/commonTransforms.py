@@ -1,7 +1,7 @@
 from loki import (Frontend, Sourcefile, FindNodes, Loop, Node, Intrinsic, Subroutine, Transformer, NestedTransformer, 
     PragmaRegion, DerivedType, Transformation, CallStatement, SymbolAttributes, BasicType, FindTypedSymbols, FindVariables, SubstituteExpressions )
 
-from loki.ir import Section, Comment, CommentBlock, VariableDeclaration, Pragma, PragmaRegion, Import, Assignment, Conditional, LeafNode, InternalNode, Associate
+from loki.ir import Section, Comment, CommentBlock, VariableDeclaration, Pragma, PragmaRegion, Import, Assignment, Conditional, LeafNode, InternalNode, Associate, MultiConditional
 
 from loki.transformations import inline_member_procedures
 
@@ -83,13 +83,22 @@ class FindNodesOutsidePragmaRegion(FindNodes):
 #        existing_modules = []
 #        for imp in FindNodes(Import).visit(routine.spec):
 
+class RepairMultiConditionals(Transformation):
+    def transform_subroutine(self, routine, **kwargs):
+        for multi in FindNodes(MultiConditional).visit(routine.body):
+            if len(multi.values) > len(multi.bodies):
+                new_bodies = multi.bodies
+                while len(new_bodies) < len(multi.values):
+                    new_bodies += (),
+                multi._update(bodies=new_bodies)
+
+
 class SplitArraysDeclarations(Transformation):
     def transform_subroutine(self, routine, **kwargs):
         decls_map = {}
         for decls in FindNodes(VariableDeclaration).visit(routine.spec):
             if len(decls.symbols) > 1:
                 if any(isinstance(s, Array) for s in decls.symbols):
-                    print("moultidecl array !!!", decls)
                     split_decls = ()
                     for s in decls.symbols:
                         split_decls += (VariableDeclaration((s,)),)
@@ -111,14 +120,23 @@ class RemovePragmas(Transformation):
 
 
 class RemovePragmaRegions(Transformation):
+    def __init__(self, empty = False):
+        self.empty = empty
     def transform_subroutine(self, routine, **kwargs):
         pragmas_map = {}
         for region in FindNodes(PragmaRegion).visit(routine.body):
-            pragmas_map[region] = region.body
+            if self.empty :
+                pragmas_map[region] = None
+            else :
+                pragmas_map[region] = region.body
+
         routine.body = Transformer(pragmas_map).visit(routine.body)
         pragmas_map = {}
         for region in FindNodes(PragmaRegion).visit(routine.spec):
-            pragmas_map[region] = region.spec
+            if self.empty :
+                pragmas_map[region] = None
+            else :
+                pragmas_map[region] = region.spec
         routine.spec = Transformer(pragmas_map).visit(routine.spec)
 
 class ReplaceAbortRegions(Transformation):
@@ -351,7 +369,7 @@ class RemoveEmptyConditionals(Transformation):
         while check:
             for cond in FindNodes(Conditional).visit(routine.body): 
                 if not cond.body and not cond.else_body :
-                    cond_map[cond] = None 
+                    cond_map[cond] = None
             if (cond_map == {}):
                 check = False
             else :
