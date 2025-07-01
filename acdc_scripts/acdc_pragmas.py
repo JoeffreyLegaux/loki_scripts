@@ -1,5 +1,5 @@
 from loki import (Frontend, Sourcefile, FindNodes, Loop, Node, Intrinsic, Subroutine, Transformer, 
-    PragmaRegion )
+    PragmaRegion, MultiConditional )
 
 from loki.ir import Section, Comment, VariableDeclaration, Pragma, FindVariables, SubstituteExpressions
 from loki.ir.pragma_utils import PragmaRegionAttacher
@@ -49,7 +49,7 @@ from syncTransforms import MakeSync
 from parallelTransforms import MakeParallel
 from commonTransforms import (SplitArraysDeclarations, RemovePragmas, RemovePragmaRegions, 
         RemoveAssignments, ReplaceAbortRegions, AddSuffixToCalls, InlineMemberCalls, RemoveComments, 
-        RemoveLoops, RemoveEmptyConditionals, AddACCRoutineDirectives )
+        RemoveLoops, RemoveEmptyConditionals, AddACCRoutineDirectives, RepairMultiConditionals )
 
 
 
@@ -57,7 +57,7 @@ from commonTransforms import (SplitArraysDeclarations, RemovePragmas, RemovePrag
 def add_to_transforms(routine, transformations):
     global treated_routines, routines_to_transform
     if routine in treated_routines:
-        transformations = {trans for trans in transformation if trans not in treated_routines[routine]}
+        transformations = {trans for trans in transformations if trans not in treated_routines[routine]}
 
     if routine not in routines_to_transform:
         routines_to_transform[routine] = transformations
@@ -112,52 +112,56 @@ output_path_interfaces = output_path + 'ifsaux/loki_interfaces/'
 # Start at CPG_DYN_SLG with empty list of forced transformations
 
 routines_to_transform = {}
-#routines_to_transform = {'CPG_DYN_SLG':{'PARALLEL'},}
-routines_to_transform['LACDYN'] ={'PARALLEL', 'ABORT'}
-#routines_to_transform = {'GPRCP_EXPL':{'SCC_DEVICE'},}
+#routines_to_transform['CPG_DYN_SLG']={'PARALLEL'}
+#routines_to_transform['LACDYN'] ={'PARALLEL'}
+#routines_to_transform['LACDYN'] ={'SCC_DEVICE'}
 #routines_to_transform['LASSIE']={'ABORT','PARALLEL'}
 #routines_to_transform['LAVENT']={'ABORT','PARALLEL'}
 #routines_to_transform['LAVABO']={'ABORT','PARALLEL'}
 #routines_to_transform['LASURE'] = {'SCC_HOST','SCC_DEVICE'}
 #routines_to_transform['LATTES']={'ABORT','PARALLEL'}
 #routines_to_transform['LATTEX']={'ABORT','PARALLEL'}
-#routines_to_transform['LATTEX']={'ABORT','PARALLEL'}
+#routines_to_transform['LATTEX']={'PARALLEL'}
 #routines_to_transform = {'VERDISINT':{'ABORT'}}
 treated_routines = {}
 
+
+routines_to_transform['GPRCP_EXPL']={'ABORT'}
+#routines_to_transform['VERDISINT']={'ABORT'}
+
+#routines_to_transform['LATTEX_EXPL_2TL']={'PARALLEL'}
 # If set to False, only apply transformation listed in routines_to_transform
 # If set to True, enqueue subroutines called during a transformation for further transformation
-greedy_process = True #False #True
+greedy_process = False #True
 
 while (len(routines_to_transform) > 0):
-    routine =  next(iter(routines_to_transform))
+    routine_name =  next(iter(routines_to_transform))
     print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-    print("treating ", routine)
+    print("treating ", routine_name)
     print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-    transformations_to_generate = routines_to_transform[routine]
+    transformations_to_generate = routines_to_transform[routine_name]
 
     # Remove routine from the list. If new transformations arise, treat them in the next pass
-    routines_to_transform.pop(routine)
+    routines_to_transform.pop(routine_name)
     print("tranforms to generate : ", transformations_to_generate) 
     print("treated routines : ", treated_routines)    
-    if routine not in params.routines_to_files:
+    if routine_name not in params.routines_to_files:
         print(f'ERROR : routine {routine} not found in files list !!!')
         exit(0)
     else:
-        file = params.routines_to_files[routine]
+        file = params.routines_to_files[routine_name]
 
     file_without_path = file.split('/')[-1:][0]
 
     source = Sourcefile.from_file(source_path+file, frontend=Frontend.FP)
 
-    routines = source.subroutines
-
-    for routine in routines:
-        # start = None
-
-        # pragmas_map = {}
-
-        attach_acdc_regions(routine)
+    routine = source.subroutines[0]
+   
+    if routine_name != routine_name:
+         print(f'ERROR : routine {routine} from file {file} does not correspond to name {routine_name} !!!')
+         exit(0)
+    
+    attach_acdc_regions(routine)
     
 
     for transform in transformations_to_generate:
@@ -175,7 +179,8 @@ while (len(routines_to_transform) > 0):
         if (transform == 'FieldAPIHost'):
             filename = '../loki_outputs/' + file[10:-4] + '_field_api_host.F90'
             f = open(filename, 'w')
-            for routine in routines:
+            if True:
+            #for routine in routines:
 
                 # Temporary remove contained routines for transformation
                 new_routine = routine.clone(contains = None)
@@ -210,7 +215,8 @@ while (len(routines_to_transform) > 0):
                 #filename = (source_path + file[:-4]).replace('main', 'local') + '_scc' + ('_host.F90' if isHost else '_device.F90')
                 filename = output_path_sources + file_without_path[:-4] + '_scc' + ('_host.F90' if isHost else '_device.F90')
                 f = open(filename, 'w')
-                for routine in routines:
+                if True:
+                #for routine in routines:
 
                     new_routine = routine.clone()
                     new_routine.apply(ReplaceAbortRegions(abort_call = False))
@@ -225,8 +231,8 @@ while (len(routines_to_transform) > 0):
                     with Timer(logger=acdc_logger, text='[ACDC] scc_transform_routine in {:.2f}s'):
                         scc_transform_routine(new_routine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols, FieldAPI_pointers=FieldAPI_pointers)
                     
-                    with Timer(logger=acdc_logger, text='[ACDC] FieldAPIPtr transform in {:.2f}s'):
-                        new_routine.apply(FieldAPIPtr(pointerType='host' if isHost else 'device'))
+                    #with Timer(logger=acdc_logger, text='[ACDC] FieldAPIPtr transform in {:.2f}s'):
+                    #    new_routine.apply(FieldAPIPtr(pointerType='host' if isHost else 'device'))
 
                     # Change called subroutines names, import their interface and add !$acc routine directives if relevant
                     add_suffix_transform =(AddSuffixToCalls(suffix='_'+transform, additional_kwvariables=[('YDSTACK','YLSTACK')]))
@@ -251,6 +257,8 @@ while (len(routines_to_transform) > 0):
                     print("writing to file : ", filename)
                     f.write(new_routine.to_fortran())
 
+                    
+                    add_to_treated(routine_name, {transform})
                 f.write('\n') #Add eol so vim doesn't complain
                 f.close()
 
@@ -263,7 +271,8 @@ while (len(routines_to_transform) > 0):
             filename = output_path_sources + file_without_path[:-4] + ('_sync_host.F90' if isHost else '_sync_device.F90')
              
             f = open(filename, 'w')
-            for routine in routines:
+            if True:
+            #for routine in routines:
                 new_routine = routine.clone()
                 new_routine.apply(ReplaceAbortRegions(abort_call = False))
                 
@@ -298,13 +307,13 @@ while (len(routines_to_transform) > 0):
                 print("writing to file : ", filename)
                 f.write(new_routine.to_fortran())
             
-                add_to_treated(routine, {transform})
+                add_to_treated(routine_name, {transform})
 
             f.write('\n') #Add eol so vim doesn't complain
             f.close()
 
 
-        elif (transform == 'ABORT' and routine not in params.ignore_abort):
+        elif (transform == 'ABORT') : #and routine not in params.ignore_abort):
             print(f'call {transform} ')
             print("====_____________================______________================______________=================")
             #filename = output_path + file[:-4] + '_abort.F90'
@@ -312,22 +321,27 @@ while (len(routines_to_transform) > 0):
             filename = output_path_sources + file_without_path[:-4] + '_abort.F90'
             print("ouput file opened : ", filename)
             f = open(filename, 'w')
-            for routine in routines:
+            if True:
+            #for routine in routines:
                 new_routine = routine.clone()
                 do_resolve_associates(new_routine)
-                new_routine.apply(RemoveLoops())
                 new_routine.apply(RemoveAssignments())                
-                new_routine.apply(ReplaceAbortRegions())
+                new_routine.apply(RemoveLoops())
+
                
+                new_routine.apply(ReplaceAbortRegions(abort_call=True))
+             
+                new_routine.apply(RemovePragmaRegions(empty = True))
                 add_suffix_transform = AddSuffixToCalls(suffix='_ABORT')
                 new_routine.apply(add_suffix_transform)
             
                 new_routine.apply(RemovePragmas())
-                new_routine.apply(RemovePragmaRegions())
                 new_routine.apply(RemoveComments())
-                new_routine.apply(RemoveEmptyConditionals())
 
-                #nproma_to_FieldAPI(new_routine, FieldAPI_pointers_names)
+                new_routine.apply(RemoveEmptyConditionals())
+                # Multi conditionals with emptied bodies get empty value instead of tuple of empties
+                # Probably a bug ?
+                new_routine.apply(RepairMultiConditionals())
 
                 if greedy_process:
                     for subroutine in add_suffix_transform.routines_called:
@@ -336,11 +350,11 @@ while (len(routines_to_transform) > 0):
 
                 transfodep = DependencyTransformation(suffix='_ABORT', include_path=output_path_interfaces)
                 new_routine.apply(transfodep, role='kernel')
-                
+
                 print("writing to file : ", filename)
                 f.write(new_routine.to_fortran())
 
-                add_to_treated(routine, {'ABORT'})
+                add_to_treated(routine_name, {'ABORT'})
 
             f.write('\n') 
             f.close()
@@ -353,8 +367,8 @@ while (len(routines_to_transform) > 0):
             filename = output_path_sources + file_without_path[:-4] + '_parallel2.F90'
             print("ouput file opened : ", filename)
             f = open(filename, 'w')
-            for routine in routines:
-                # new_routine = routine.clone(contains=None)
+            if True:
+            #for routine in routines:
                 new_routine = routine.clone()
                 #new_routine.apply(RemoveComments())
                 #new_routine.apply(InlineMemberCalls())
@@ -373,8 +387,8 @@ while (len(routines_to_transform) > 0):
                     for subroutine in parallel_transform.subroutines_to_transform:
                         add_to_transforms(subroutine, parallel_transform.subroutines_to_transform[subroutine])
                         print("added transfo ", subroutine, parallel_transform.subroutines_to_transform[subroutine])
+
                 print("routines to trasnsform ? ", routines_to_transform)
-                    
                 new_routine.apply(RemovePragmaRegions())
 
                 transfodep = DependencyTransformation(suffix='_PARALLEL2', include_path=output_path_interfaces)
@@ -391,7 +405,7 @@ while (len(routines_to_transform) > 0):
 
 
 
-                add_to_treated(routine, {'PARALLEL'})
+                add_to_treated(routine_name, {'PARALLEL'})
 
             f.write('\n') 
             f.close()
