@@ -230,7 +230,7 @@ class MakeSync(Transformation):
                 #print("writes : ", writes)
                 return (reads, writes, static_reads, static_writes)
 
-        elif isinstance(node, Section):
+        elif isinstance(node, Section) or isinstance(node, Loop):
             # also covers Associate nodes
             # just recurse on the body
 
@@ -304,6 +304,7 @@ class MakeSync(Transformation):
         #if var.type.pointer: 
         associate_call = InlineCall(function=DeferredTypeSymbol(name='ASSOCIATED'), parameters=(var,) )
         cond = Conditional(condition=associate_call, body = (sync_call,), inline = True)
+        return cond
         if not derived:
             return cond
         else :
@@ -385,7 +386,7 @@ class MakeSync(Transformation):
             else:
                 return False
         
-        elif isinstance(node, Section):
+        elif isinstance(node, Section) or isinstance(node, Loop):
             return self.clearAssigns(node.body, upper_reads, upper_writes)
         
         elif isinstance(node, Conditional):
