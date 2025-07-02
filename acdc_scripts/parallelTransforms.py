@@ -668,6 +668,9 @@ class MakeParallel(Transformation):
 
                 if (target == 'OpenMP'):
                     new_region = FieldAPIPtr(pointerType='host').transform_node(region, routine)
+                    for call in FindNodes(CallStatement).visit(new_region.body):
+                        ReplaceArguments(call, {'YDCPG_BNDS%KIDIA':Variable(name='KIDIA', parent = local_boundary_variable), \
+                                                'YDCPG_BNDS%KFDIA':Variable(name='KFDIA', parent = local_boundary_variable)})
                     new_loop = self.makeOpenMPLoop(routine, local_boundary_variable, new_region)
                     new_body = (call_sync, new_loop,)
 
