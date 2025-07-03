@@ -292,6 +292,20 @@ class MakeParallel(Transformation):
 
     def makeOpenMPLoop(self, routine, boundary_variable, region):
 
+       
+        var_map={}
+        for var in FindVariables().visit(region.body):
+            if var.name == 'YDCPG_BNDS':
+                var_map[var] = boundary_variable
+            elif (var.name == 'YDCPG_BNDS%KIDIA' or var.name == 'YDCPG_BNDS%KFDIA'):
+                var_map[var] = var.clone(parent=boundary_variable)
+
+        new_body = SubstituteExpressions(var_map).visit(region.body)
+        new_region = region.clone(body = new_body)
+        
+        new_region = FieldAPIPtr(pointerType='host').transform_node(new_region, routine)
+        #new_region.apply( FieldAPIPtr(pointerType='host'))
+        
         init_bounds = CallStatement(name = DeferredTypeSymbol( name='INIT',
                                                                parent = boundary_variable),
                                     arguments=(Variable(name=params.cpg_opts_variable)),
@@ -299,7 +313,7 @@ class MakeParallel(Transformation):
                                     )
         loop_pragma = Pragma(   keyword="OMP", 
                                 content = "PARALLEL DO FIRSTPRIVATE ("+ boundary_variable.name +") PRIVATE (" + 
-                                self.block_counter.name + self.getPrivateNameList(region) + ") "
+                                self.block_counter.name + self.getPrivateNameList(new_region) + ") "
                             )
 
         #We prepare the call to update_view for the block index
@@ -309,7 +323,7 @@ class MakeParallel(Transformation):
                                             scope=routine
                                             )
    
-        new_loop = self.blocks_loop.clone(body=(loop_new_statements, region.body,), pragma=(loop_pragma,) )
+        new_loop = self.blocks_loop.clone(body=(loop_new_statements, new_region.body,), pragma=(loop_pragma,) )
 
         return (init_bounds, new_loop,)
 
@@ -667,11 +681,7 @@ class MakeParallel(Transformation):
                 #Create the replacement body for the region for current target
 
                 if (target == 'OpenMP'):
-                    new_region = FieldAPIPtr(pointerType='host').transform_node(region, routine)
-                    for call in FindNodes(CallStatement).visit(new_region.body):
-                        ReplaceArguments(call, {'YDCPG_BNDS%KIDIA':Variable(name='KIDIA', parent = local_boundary_variable), \
-                                                'YDCPG_BNDS%KFDIA':Variable(name='KFDIA', parent = local_boundary_variable)})
-                    new_loop = self.makeOpenMPLoop(routine, local_boundary_variable, new_region)
+                    new_loop = self.makeOpenMPLoop(routine, local_boundary_variable, region)
                     new_body = (call_sync, new_loop,)
 
                 elif (target == 'OpenMPSingleColumn'):
