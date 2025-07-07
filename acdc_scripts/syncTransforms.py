@@ -194,8 +194,8 @@ class MakeSync(Transformation):
                 #print("derived toussa ", [s.name for s in self.derived_with_indexes])
                 to_remove = []
                 for (w,s) in writes:
-                    print(w)
-                    print(s)
+                    #print(w)
+                    #print(s)
                     for derived in self.derived_with_indexes:
                         if s == derived.name:
                             new_var = w.clone(parent=derived.parent)
@@ -207,8 +207,8 @@ class MakeSync(Transformation):
                 #print("reads ", reads) 
                 to_remove = []
                 for (r,s) in reads:
-                    print(r)
-                    print(s)
+                    #print(r)
+                    #print(s)
                     for derived in self.derived_with_indexes:
                         if s == derived.name:
                             new_var = r.clone(parent=derived.parent)
@@ -582,8 +582,8 @@ class MakeSync(Transformation):
                 # print("une seule section")
                 sect = self.sections[0]
 
-        print("section ? ", sect, type(sect))
-        print(sect.body, type(sect.body))
+        #print("section ? ", sect, type(sect))
+        #print(sect.body, type(sect.body))
 
         # We might end up with a condition with has_elseif attribute but without else_body.
         # This crashes reconstruction of the node, so we preventively eliminate all those attributes.
@@ -615,9 +615,7 @@ class MakeSync(Transformation):
             if var_map:        
                 cond_map[cond] = cond.clone(condition = SubstituteExpressions(var_map).visit(cond.condition))
         routine.body = Transformer(cond_map).visit(routine.body)
-
  
-        print("nproma pointaz ? ", self.nproma_pointers)
 
         # Initiate the data analysis process with loki built-in function
         map = {}
