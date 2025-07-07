@@ -127,7 +127,7 @@ class MakeSync(Transformation):
 
     # def findAssigns(self, node, balise, depth) : 
     def findAssigns(self, node) : 
-        print("find ", type(node))        
+        #print("find ", type(node))        
         if isinstance(node, tuple):
             # sequence of actual nodes : get the list of unique reads and writes from each node
 
@@ -160,13 +160,13 @@ class MakeSync(Transformation):
         # Assignments never exist by themselves, they are part of a section (routine, condition or loop body...)
         # Therefore we do not save anything at those nodes except for static operations that should stay in place
         elif isinstance(node, Assignment):
-            print("assing : ", node)
+            #print("assing : ", node)
             if node.ptr :
                 print("node ptr : ", node)
                 return([], [], [], [])
             else :
-                print("defines ? ", [s.name for s in node.defines_symbols])
-                print("uses ? ", [s.name for s in node.uses_symbols])
+                #print("defines ? ", [s.name for s in node.defines_symbols])
+                #print("uses ? ", [s.name for s in node.uses_symbols])
                 
                 # Get a tuple (FieldApi symbol, original symbol) for every variable in the node dataflow
                 writes = [(symbol, s)
@@ -176,7 +176,7 @@ class MakeSync(Transformation):
                                 ]
                             if test ]
 
-                print("writes ??? ", [w.name for (w,s) in writes])
+                #print("writes ??? ", [w.name for (w,s) in writes])
                 reads = [(symbol, s)
                             for ((test, symbol), s) in [
                                 (self.isNpromaOrFieldAPI(s),s) 
@@ -186,12 +186,12 @@ class MakeSync(Transformation):
                                 ]
                             if test ]                        
                
-                print("reads ??? ", [r.name for (r,s) in reads])
+                #print("reads ??? ", [r.name for (r,s) in reads])
                 static_reads = []
                 static_writes = []
                 
                 #print("writes ", writes)
-                print("derived toussa ", [s.name for s in self.derived_with_indexes])
+                #print("derived toussa ", [s.name for s in self.derived_with_indexes])
                 to_remove = []
                 for (w,s) in writes:
                     print(w)
@@ -203,7 +203,7 @@ class MakeSync(Transformation):
                             to_remove.append((w,s))
                 writes = [w for w in writes if w not in to_remove]
 
-                print("reads")
+                #print("reads")
                 #print("reads ", reads) 
                 to_remove = []
                 for (r,s) in reads:
@@ -214,7 +214,7 @@ class MakeSync(Transformation):
                             new_var = r.clone(parent=derived.parent)
                             static_reads.append((new_var, True))
                             to_remove.append((r,s))
-                print("after reads")
+                #print("after reads")
                 reads = [r for r in reads if r not in to_remove]
 
 
@@ -227,13 +227,13 @@ class MakeSync(Transformation):
                 if static_list != []:
                     self.map_static[node] = static_list
                 #print("static reads : ", static_reads)
-                print("static writes : ", static_writes)
-                print("writes : ", writes)
+                #print("static writes : ", static_writes)
+                #print("writes : ", writes)
                 returned_reads = [r for (r,s) in reads if r not in [sr for (sr,_) in static_reads]]
                 returned_writes = [w for (w,s) in writes if w not in [sw for (sw,_) in static_writes]]
                 #print("writes filtered ? ",  [w for (w,s) in writes])
                 #print("statics filtered ? ",  [sw for (sw,_) in static_writes])
-                print("returned writes : ", returned_writes)
+                #print("returned writes : ", returned_writes)
                 
                 #print("reads : ", reads)
                 #return (reads, writes, static_reads, static_writes)
@@ -306,7 +306,7 @@ class MakeSync(Transformation):
             print("no mode for call statement creation !!!")
             exit(1)
 
-        print("VAR ?", var, var.type, var.type.pointer, derived)
+        #print("VAR ?", var, var.type, var.type.pointer, derived)
 
 
         sync_call = CallStatement(name = DeferredTypeSymbol(name=call_name, parent = var), arguments=(), scope=None)
@@ -321,7 +321,7 @@ class MakeSync(Transformation):
             # If flagged as derived type with index, there must be a parent with index
             while str(parent) == parent.name:
                 parent = parent.parent
-            print("parent found : ", parent, type(parent), parent.dimensions[0])
+            #print("parent found : ", parent, type(parent), parent.dimensions[0])
         
             loop = Loop(variable=parent.dimensions[0],  
                         bounds = LoopRange((IntLiteral(1), 
@@ -336,10 +336,10 @@ class MakeSync(Transformation):
 
 
     def clearAssigns(self, node, upper_reads, upper_writes):
-        print("clear ", type(node), upper_reads, upper_writes)
+        #print("clear ", type(node), upper_reads, upper_writes)
         if isinstance(node, tuple):
-            for c in node:
-                print("tuple => ", c)
+            #for c in node:
+            #    print("tuple => ", c)
             if (node == ()):
                 assert node not in self.map_reads, ('empty node in map !')
                 assert node not in self.map_writes, ('empty node in map !')
@@ -356,24 +356,23 @@ class MakeSync(Transformation):
                 # First iterate on underlying nodes, keeping them in order (might contain static assignments)
                 for c in node :
                     empty_c = self.clearAssigns(c, upper_reads + new_reads, upper_writes + new_writes) 
-                    print("c : ", c, empty_c, c in self.map_static)
+                    #print("c : ", c, empty_c, c in self.map_static)
                     if not empty_c:
                         empty = False
                         if c in self.map_static:
                             self.map_nodes[c] = None
-                            print("map static du sous-node :",  self.map_static[c])
+                            #print("map static du sous-node :",  self.map_static[c])
                             for (var, rw, _) in self.map_static[c]:
-                                print("variables statiqeu ", var, rw)
+                                #print("variables statiqeu ", var, rw)
                                 self.map_nodes[node] += (self.createSyncCallStatement(var, rw), )
 
                         else :
-                            print("noe empty_c")
+                            #print("noe empty_c")
                             self.map_nodes[node] += (c,)
 
 
 
                 for w in new_writes:
-                    print("yeah write : ", w) 
                     self.map_nodes[node] += (self.createSyncCallStatement(w, 'W'), ) 
                     empty = False
 
@@ -381,11 +380,6 @@ class MakeSync(Transformation):
                     self.map_nodes[node] += (self.createSyncCallStatement(r, 'R'), ) 
                     empty = False
                 
-                #for (s, mode, derived) in self.map_static[node]:
-                #    print("statiiiiique ", s )
-                #    self.map_nodes[node] += (self.createSyncCallStatement(s, mode, derived), )
-                #    empty = False
-
                 if self.map_nodes[node] == ():
                     #print("new node is None, node is : ", node)
                     # Node might have become empty, do not map it !!!
@@ -399,11 +393,11 @@ class MakeSync(Transformation):
                 #for var, rw in self.map_static[node]:
                 #     self.map_nodes[node] += (self.createSyncCallStatement(var, rw), )
 
-                print("self map_nodes ? ", self.map_nodes[node])
-                for n in self.map_nodes[node]:
-                    print("dans map_nodes : ", n)
-                    if isinstance(n, Conditional):
-                        print(n.condition, n.body)
+                #print("self map_nodes ? ", self.map_nodes[node])
+                #for n in self.map_nodes[node]:
+                #    print("dans map_nodes : ", n)
+                #    if isinstance(n, Conditional):
+                #        print(n.condition, n.body)
 
                 return empty
 
@@ -411,7 +405,7 @@ class MakeSync(Transformation):
         elif isinstance(node, Assignment):
             # If the node is a pointer assignment OR a static assignment,
             # conserve the node as is
-            print("node ", node, node in self.map_static)
+            #print("node ", node, node in self.map_static)
             if node.ptr or node in self.map_static:
                 return False
             else:
@@ -427,11 +421,11 @@ class MakeSync(Transformation):
             new_reads = [w for w in self.map_reads[node] if w not in upper_reads and w not in new_writes]
 
             #new_nodes = ()
-            if (new_writes != []):
-                print("IF new_writes ", new_writes)
+            #if (new_writes != []):
+                #print("IF new_writes ", new_writes)
                 #new_nodes += (Intrinsic(text=f'!IF writes {new_writes}'),)
-            if (new_reads != []):
-                print("IF new_reads ", new_reads)
+            #if (new_reads != []):
+                #print("IF new_reads ", new_reads)
                 #new_nodes += (Intrinsic(text=f'!IF reads {new_reads}'),)
                 
 
@@ -439,7 +433,7 @@ class MakeSync(Transformation):
             empty_else = self.clearAssigns(node.else_body, upper_reads + new_reads, upper_writes + new_writes)
 
             if empty_else and empty_body :
-                print("empty!!!!")
+                #print("empty!!!!")
                 self.map_nodes[node] = None            
 
             return (empty_body and empty_else)
@@ -459,7 +453,7 @@ class MakeSync(Transformation):
                 empty_else = self.clearAssigns(node.else_body, upper_reads + new_reads, upper_writes + new_writes)
 
             if empty_else and empty_body :
-                print("empty multicond!!!!")
+                #print("empty multicond!!!!")
                 self.map_nodes[node] = None            
 
             #print("return Multicond clear ", node)
@@ -636,9 +630,10 @@ class MakeSync(Transformation):
 
         top_reads = [r for r in top_reads if r not in top_writes]
         top_reads = []
-        print("top_reads : ", top_reads)
-        print("top_writes : ", top_writes)
-        print("MAP STATIIIIIC ", self.map_static)
+        #print("top_reads : ", top_reads)
+        #print("top_writes : ", top_writes)
+        
+        
         # Second step : top-down traversal of the section
         # This step inserts sync calls for variables at the highest level (identified in first step)
         self.clearAssigns(routine.body, top_reads, top_writes)
@@ -685,9 +680,12 @@ class MakeSync(Transformation):
                                             kwarguments = bounds_kwargs + (('PERSISTENT', LogicLiteral(True)), ),
                                             scope=routine
                                            )
+
+            copy_call = CallStatement(name = DeferredTypeSymbol(name='COPY_OBJECT',parent=array),
+                                        arguments=(), scope=routine )
             associate_call = InlineCall(function=DeferredTypeSymbol(name='ASSOCIATED'), 
                                         parameters=(array,) )
-            cond = Conditional(condition=LogicalNot(associate_call), body = (field_new_call,), inline = True)
+            cond = Conditional(condition=LogicalNot(associate_call), body = (field_new_call,copy_call,))
  
             routine.body.append(cond)
        
