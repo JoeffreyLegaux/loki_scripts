@@ -14,6 +14,8 @@ from arpege_parameters import params
 
 from fieldAPITransforms import is_fieldAPI_ARRAY, get_fieldAPI_member, get_fieldAPI_variables, get_pointers_to_FieldAPI
 
+from termcolor import colored
+
 import re
 
 def addFieldAPIPointers(routine, number_of_pointers):
@@ -308,29 +310,31 @@ class MakeSync(Transformation):
 
         #print("VAR ?", var, var.type, var.type.pointer, derived)
 
-
         sync_call = CallStatement(name = DeferredTypeSymbol(name=call_name, parent = var), arguments=(), scope=None)
-        #if var.type.pointer: 
         associate_call = InlineCall(function=DeferredTypeSymbol(name='ASSOCIATED'), parameters=(var,) )
         cond = Conditional(condition=associate_call, body = (sync_call,), inline = True)
         return cond
-        if not derived:
-            return cond
-        else :
-            parent = var.parent
-            # If flagged as derived type with index, there must be a parent with index
-            while str(parent) == parent.name:
-                parent = parent.parent
-            #print("parent found : ", parent, type(parent), parent.dimensions[0])
         
-            loop = Loop(variable=parent.dimensions[0],  
-                        bounds = LoopRange((IntLiteral(1), 
-                                            InlineCall(function=DeferredTypeSymbol('SIZE'), 
-                                                        parameters = (parent.clone(dimensions=None),)) 
-                                           )), 
-                        body = cond)
-
-            return loop
+        # Do not create loop : the original loop exists in the caller (for sync regions)
+        # on has been conserved in the body of the rougine (for sync routines)
+        
+        #if not derived:
+        #    return cond
+        #else :
+        #    parent = var.parent
+        #    # If flagged as derived type with index, there must be a parent with index
+        #    while str(parent) == parent.name:
+        #        parent = parent.parent
+        #    #print("parent found : ", parent, type(parent), parent.dimensions[0])
+        #
+        #    loop = Loop(variable=parent.dimensions[0],  
+        #                bounds = LoopRange((IntLiteral(1), 
+        #                                    InlineCall(function=DeferredTypeSymbol('SIZE'), 
+        #                                                parameters = (parent.clone(dimensions=None),)) 
+        #                                   )), 
+        #                body = cond)
+        #
+        #    return loop
         #else:
         #    return sync_call
 
@@ -486,7 +490,8 @@ class MakeSync(Transformation):
             if index :
                 if var.name not in [v.name for v in  self.derived_with_indexes]:
                     self.derived_with_indexes.add(var)
-                
+
+        print (colored(f'Sync transform : deirved types with indexes found  : {self.derived_with_indexes} ', 'green'))
 
         # We will very likely transform some variables into FIELD_BASIC
         #routine.spec.prepend(Import(module="FIELD_MODULE", symbols=(DeferredTypeSymbol(name='FIELD_BASIC'),)))
@@ -514,7 +519,7 @@ class MakeSync(Transformation):
 
 
         
-       # Create the dict of FieldAPI variables used in this routine
+        # Create the dict of FieldAPI variables used in this routine
         self.fieldAPI_variables = get_fieldAPI_variables(routine)
         
         # Subroutines called inside a SYNC routine will only accept FIELD_BASIC arguments for FieldAPI variables.
@@ -522,7 +527,7 @@ class MakeSync(Transformation):
         # The replacement of variable usage with SYNC calls would erase the added pointers association,
         # so here we only build the map which will be applied later.
 
-        fAPI_arrays = set()
+        fAPI_arrays_in_calls = set()
         calls_map = {}
         total_FAPI_pointers = 0
         for call in FindNodes(CallStatement).visit(routine.body):
@@ -550,7 +555,7 @@ class MakeSync(Transformation):
                         fAPI_member = self.get_fieldAPI_member(arg)
                         if fAPI_member :
                             args_to_fAPI[arg] = Variable(name = fAPI_member[0], parent=arg.parent, scope=routine)
-                            fAPI_arrays.add((args_to_fAPI[arg], fAPI_member[1] ) )
+                            fAPI_arrays_in_calls.add((args_to_fAPI[arg], fAPI_member[1] ) )
                 
                 if args_to_fAPI or args_to_pointers :
                     assignments = []
@@ -654,7 +659,7 @@ class MakeSync(Transformation):
  
  
         # Remove inlining from conditionnals that contain more than one statement        
-        cond_map = {}
+        #cond_map = {}
         #for cond in FindNodes(Conditional).visit(routine.body):
         #    if cond.inline: 
                 
@@ -665,13 +670,25 @@ class MakeSync(Transformation):
                 #cond._update(inline=False)
         #routine.body = Transformer(cond_map).visit(routine.body)
 
-
-
-
+        
+        
         # Transform the subroutine calls arguments into FIELD_BASIC pointers when relevant
+        # These variables were identified beforehand, but we had to keep their original type
+        # for the rest of the process
         routine.body = Transformer(calls_map).visit(routine.body)
 
-        for (array,size) in fAPI_arrays:
+        
+        
+        # Unused FieldAPI arrays might have not been created on the GPU side
+        # However these arrays might be passed to subroutine calls inside GPU kernels
+        # Therefore, their pointers have to be PRESENT in gpu memory.
+        # We enforce allocation and copy of a 1-element array for those pointers.
+
+        # Currently, only utilize fAPI_arrays_in_calls because these showed to be problematic
+        # In the general case, we could expand to all non-local arrays to ensure 100% foolproof behavior
+
+        # Overall, it would be better to have that done systemically at the creation of the type.
+        for (array,size) in fAPI_arrays_in_calls:
             bounds_kwargs = ( ( 'UBOUNDS', LiteralList(tuple([1 for s in range(size+1)])) ),)
             field_new_call = CallStatement( name = DeferredTypeSymbol(name='FIELD_NEW'),
                                             arguments = array,
@@ -688,5 +705,5 @@ class MakeSync(Transformation):
             routine.body.append(cond)
        
         # We need FIELD_FACTORY_MODULE for FIELD_NEW
-        if (len(fAPI_arrays) > 0):
+        if (len(fAPI_arrays_in_calls) > 0):
             routine.spec.prepend(Import(module="FIELD_FACTORY_MODULE"))     
