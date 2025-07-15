@@ -188,6 +188,12 @@ class MakeSync(Transformation):
                                 ]
                             if test ]                        
                
+                if (reads == [] and writes == []):
+                    print("assignement without fieldapi : ", node)
+                    self.map_static[node] = []
+                    return ([], [], [], [])
+
+
                 #print("reads ??? ", [r.name for (r,s) in reads])
                 static_reads = []
                 static_writes = []
@@ -205,7 +211,8 @@ class MakeSync(Transformation):
                             to_remove.append((w,s))
                 writes = [w for w in writes if w not in to_remove]
 
-                #print("reads")
+
+                               #print("reads")
                 #print("reads ", reads) 
                 to_remove = []
                 for (r,s) in reads:
@@ -363,7 +370,8 @@ class MakeSync(Transformation):
                     #print("c : ", c, empty_c, c in self.map_static)
                     if not empty_c:
                         empty = False
-                        if c in self.map_static:
+                        if c in self.map_static and self.map_static[c] != [] :
+                            print("node static", c)
                             self.map_nodes[c] = None
                             #print("map static du sous-node :",  self.map_static[c])
                             for (var, rw, _) in self.map_static[c]:
@@ -371,7 +379,7 @@ class MakeSync(Transformation):
                                 self.map_nodes[node] += (self.createSyncCallStatement(var, rw), )
 
                         else :
-                            #print("noe empty_c")
+                            print("node empty_c", c)
                             self.map_nodes[node] += (c,)
 
 
@@ -678,6 +686,7 @@ class MakeSync(Transformation):
         routine.body = Transformer(calls_map).visit(routine.body)
 
         
+       
         
         # Unused FieldAPI arrays might have not been created on the GPU side
         # However these arrays might be passed to subroutine calls inside GPU kernels
@@ -688,22 +697,28 @@ class MakeSync(Transformation):
         # In the general case, we could expand to all non-local arrays to ensure 100% foolproof behavior
 
         # Overall, it would be better to have that done systemically at the creation of the type.
-        for (array,size) in fAPI_arrays_in_calls:
-            bounds_kwargs = ( ( 'UBOUNDS', LiteralList(tuple([1 for s in range(size+1)])) ),)
-            field_new_call = CallStatement( name = DeferredTypeSymbol(name='FIELD_NEW'),
-                                            arguments = array,
-                                            kwarguments = bounds_kwargs + (('PERSISTENT', LogicLiteral(True)), ),
-                                            scope=routine
-                                           )
+        if self.callSuffix == 'SYNC_DEVICE' or self.callSuffix == 'SYNC_HOST':
+            for (array,size) in fAPI_arrays_in_calls:
+                bounds_kwargs = ( ( 'UBOUNDS', LiteralList(tuple([1 for s in range(size+1)])) ),)
+                field_new_call = CallStatement( name = DeferredTypeSymbol(name='FIELD_NEW'),
+                                                arguments = array,
+                                                kwarguments = bounds_kwargs + (('PERSISTENT', LogicLiteral(True)), ),
+                                                scope=routine
+                                               )
+                
+                associate_call = InlineCall(function=DeferredTypeSymbol(name='ASSOCIATED'), 
+                                            parameters=(array,) )
+                if self.callSuffix == 'SYNC_DEVICE' :  #or True:
+                    copy_call = CallStatement(name = DeferredTypeSymbol(name='COPY_OBJECT',parent=array),
+                                                arguments=(), scope=routine )
+                    cond = Conditional(condition=LogicalNot(associate_call), body = (field_new_call,copy_call,))
 
-            copy_call = CallStatement(name = DeferredTypeSymbol(name='COPY_OBJECT',parent=array),
-                                        arguments=(), scope=routine )
-            associate_call = InlineCall(function=DeferredTypeSymbol(name='ASSOCIATED'), 
-                                        parameters=(array,) )
-            cond = Conditional(condition=LogicalNot(associate_call), body = (field_new_call,copy_call,))
- 
-            routine.body.append(cond)
-       
-        # We need FIELD_FACTORY_MODULE for FIELD_NEW
-        if (len(fAPI_arrays_in_calls) > 0):
-            routine.spec.prepend(Import(module="FIELD_FACTORY_MODULE"))     
+                else : 
+                    cond = Conditional(condition=LogicalNot(associate_call), body = (field_new_call,))
+
+                routine.body.append(cond)
+      
+
+            # We need FIELD_FACTORY_MODULE for FIELD_NEW
+            if (len(fAPI_arrays_in_calls) > 0):
+                routine.spec.prepend(Import(module="FIELD_FACTORY_MODULE"))     
