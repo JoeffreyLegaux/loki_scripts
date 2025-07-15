@@ -29,6 +29,28 @@ def ReplaceArguments(node, args_dict):
 
     node._update(arguments = new_args)
 
+
+class AddFieldAPISuffixToCalls(Transformation):
+    def __init__(self, argument):
+        self.argument = argument
+        self.routines_called = set()
+
+    def transform_node(self, node, routine, inplace = False):
+        calls_map = {}
+        for call in FindNodes(CallStatement).visit(node.body):
+            if self.argument in [arg.name for arg in call.arguments if hasattr(arg, "name")]:
+                new_section = Section(body = call)
+                new_section = AddSuffixToCalls(suffix='_FIELD_API').transform_node(new_section, routine)
+                calls_map[call] = new_section.body
+                self.routines_called.add(call.name.name)
+        if inplace:
+            node.body = Transformer(calls_map).visit(node.body)
+        else :
+            node._update(body = Transformer(calls_map).visit(node.body) )
+
+    def transform_subroutine(self, routine, **kwargs):
+        self.transform_node(routine, routine, inplace=True)
+
 class FindNodesOutsidePragmaRegion(FindNodes):
     """
      Find :any:`Node` instances that match a given criterion,
@@ -64,6 +86,7 @@ class FindNodesOutsidePragmaRegion(FindNodes):
             if not isinstance(i, PragmaRegion):
                 ret = self.visit(i, ret=ret, **kwargs)
         return ret or self.default_retval()
+
 
 
 
