@@ -48,8 +48,8 @@ from arpege_parameters import params
 from syncTransforms import MakeSync
 from parallelTransforms import MakeParallel
 from commonTransforms import (SplitArraysDeclarations, RemovePragmas, RemovePragmaRegions, 
-        RemoveAssignments, ReplaceAbortRegions, AddSuffixToCalls, InlineMemberCalls, RemoveComments, 
-        RemoveLoops, RemoveEmptyConditionals, AddACCRoutineDirectives, RepairMultiConditionals )
+        RemoveAssignments, ReplaceAbortRegions, AddSuffixToCalls, AddFieldAPISuffixToCalls, InlineMemberCalls, 
+        RemoveComments, RemoveLoops, RemoveEmptyConditionals, AddACCRoutineDirectives, RepairMultiConditionals )
 
 
 
@@ -113,8 +113,8 @@ output_path_interfaces = output_path + 'ifsaux/loki_interfaces/'
 
 routines_to_transform = {}
 #routines_to_transform['CPG_DYN_SLG']={'PARALLEL'}
-#routines_to_transform['LACDYN'] ={'PARALLEL'}
-#routines_to_transform['LACDYN'] ={'SCC_DEVICE'}
+routines_to_transform['LACDYN'] ={'PARALLEL'}
+#routines_to_transform['LACDYN'] ={'SYNC_DEVICE'}
 #routines_to_transform['LASSIE']={'ABORT','PARALLEL'}
 #routines_to_transform['LAVENT']={'ABORT','PARALLEL'}
 #routines_to_transform['LAVABO']={'ABORT','PARALLEL'}
@@ -126,25 +126,25 @@ routines_to_transform = {}
 treated_routines = {}
 
 
-routines_to_transform['GPRCP_EXPL']={'ABORT'}
+#routines_to_transform['LAVABO_EXPL_LAITVSPCQM_PART1']={'SYNC_HOST'}
 #routines_to_transform['VERDISINT']={'ABORT'}
 
 #routines_to_transform['LATTEX_EXPL_2TL']={'PARALLEL'}
 # If set to False, only apply transformation listed in routines_to_transform
 # If set to True, enqueue subroutines called during a transformation for further transformation
-greedy_process = False #True
+greedy_process = True #False #True
 
 while (len(routines_to_transform) > 0):
     routine_name =  next(iter(routines_to_transform))
     print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-    print("treating ", routine_name)
+    print("Treating ", routine_name)
     print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
     transformations_to_generate = routines_to_transform[routine_name]
 
     # Remove routine from the list. If new transformations arise, treat them in the next pass
     routines_to_transform.pop(routine_name)
-    print("tranforms to generate : ", transformations_to_generate) 
-    print("treated routines : ", treated_routines)    
+    print("Transformations to generate : ", transformations_to_generate) 
+    #print("treated routines : ", treated_routines)    
     if routine_name not in params.routines_to_files:
         print(f'ERROR : routine {routine} not found in files list !!!')
         exit(0)
@@ -173,11 +173,9 @@ while (len(routines_to_transform) > 0):
         print("FieldAPI_pointers found in acdc_pragmes : ", FieldAPI_pointers, type(FieldAPI_pointers))
        
 
-        # ========================================
-        # Completely useless now ????
-        # ========================================
-        if (transform == 'FieldAPIHost'):
-            filename = '../loki_outputs/' + file[10:-4] + '_field_api_host.F90'
+        if (transform == 'FIELD_API'):
+            #filename = '../loki_outputs/' + file[10:-4] + '_field_api_host.F90'
+            filename = output_path_sources + file_without_path[:-4] + '_field_api.F90'
             f = open(filename, 'w')
             if True:
             #for routine in routines:
@@ -185,19 +183,36 @@ while (len(routines_to_transform) > 0):
                 # Temporary remove contained routines for transformation
                 new_routine = routine.clone(contains = None)
 
+
+                new_routine.apply(ReplaceAbortRegions(abort_call = False))
                 new_routine.apply(RemovePragmaRegions())
+                new_routine.apply(InlineMemberCalls())
+
                 new_routine.apply(RemovePragmas())
                 new_routine.apply(RemoveComments())
 
                 new_routine.apply(FieldAPIPtr(pointerType='host'))
 
-                # Add suffix and generate interface file
-                transfodep = DependencyTransformation(suffix='_FIELD_API_HOST',  include_path='../loki_outputs/')
-                new_routine.apply(transfodep, role='kernel')
                 
+
+              
+                add_suffix_transform = AddFieldAPISuffixToCalls(argument='YDCPG_BNDS')
+                new_routine.apply(add_suffix_transform) 
+            
+                # Add suffix and generate interface file
+            
+                if greedy_process:
+                    for subroutine in add_suffix_transform.routines_called:
+                        add_to_transforms(subroutine, {'FIELD_API'})
+
+
+                
+                transfodep = DependencyTransformation(suffix='_FIELD_API', include_path=output_path_interfaces)
+                new_routine.apply(transfodep, role='kernel')
+ 
                 # Get contained routines back
-                new_routine.contains = routine.contains
-                new_routine.apply(AddSuffixToCalls(suffix='_FIELD_API_HOST'))
+                #new_routine.contains = routine.contains
+                #new_routine.apply(AddSuffixToCalls(suffix='_FIELD_API_HOST'))
             
                 print("writing to file : ", filename)
                 f.write(new_routine.to_fortran())
@@ -282,7 +297,7 @@ while (len(routines_to_transform) > 0):
                 new_routine.apply(InlineMemberCalls())
                 new_routine.apply(RemoveComments())
                 #new_routine.apply(RemoveLoops(['JLON', 'JLEV']))
-                new_routine.apply(RemoveLoops())
+                new_routine.apply(RemoveLoops(indices=params.nproma_loop_indices + params.vertical_loop_indices))
                 add_suffix_transform = AddSuffixToCalls(suffix='_SYNC_HOST' if isHost else '_SYNC_DEVICE')
                 new_routine.apply(add_suffix_transform)
                 print("after add suffix")
@@ -372,23 +387,23 @@ while (len(routines_to_transform) > 0):
                 new_routine = routine.clone()
                 #new_routine.apply(RemoveComments())
                 #new_routine.apply(InlineMemberCalls())
-                print("after inline")
                 do_resolve_associates(new_routine)
 
                 new_routine.apply(ReplaceAbortRegions())
 
                 parallel_transform = MakeParallel(FieldAPI_pointers) 
                 new_routine.apply(parallel_transform)
-                print("routine parallele : ", parallel_transform.subroutines_to_transform)
+                #print("routine parallele : ", parallel_transform.subroutines_to_transform)
                 # We probably will have for new routines 'PARALLEL' 'SYNC' and 'ABORT' transforms to add
-                print("treated routines : ", treated_routines)
+                #print("treated routines : ", treated_routines)
                 
                 if greedy_process:
                     for subroutine in parallel_transform.subroutines_to_transform:
                         add_to_transforms(subroutine, parallel_transform.subroutines_to_transform[subroutine])
-                        print("added transfo ", subroutine, parallel_transform.subroutines_to_transform[subroutine])
+                        #print("added transfo ", subroutine, parallel_transform.subroutines_to_transform[subroutine])
 
-                print("routines to trasnsform ? ", routines_to_transform)
+                #print("routines to trasnsform ? ", routines_to_transform)
+
                 new_routine.apply(RemovePragmaRegions())
 
                 transfodep = DependencyTransformation(suffix='_PARALLEL2', include_path=output_path_interfaces)
@@ -406,7 +421,6 @@ while (len(routines_to_transform) > 0):
 
 
                 add_to_treated(routine_name, {'PARALLEL'})
-
             f.write('\n') 
             f.close()
 

@@ -15,7 +15,7 @@ from syncTransforms import MakeSync, addFieldAPIPointers
 from fieldAPITransforms import FieldAPIPtr, get_fieldAPI_variables, get_fieldAPI_member, is_fieldAPI_ARRAY
 from commonTransforms import InlineMemberCalls, RemoveComments, RemovePragmas, RemovePragmaRegions, RemoveEmptyConditionals, \
                                 AddSuffixToCalls, RemoveLoops, RemoveUnusedVariables, AddACCRoutineDirectives, \
-                                RemoveUnusedImports, FindNodesOutsidePragmaRegion, ReplaceArguments
+                                RemoveUnusedImports, FindNodesOutsidePragmaRegion, ReplaceArguments, AddFieldAPISuffixToCalls
 
 from arpege_parameters import params
 
@@ -25,8 +25,8 @@ from openacc_transform import scc_transform_routine, alloc_temp
 
 from termcolor import colored
 
-
 class MakeParallel(Transformation):
+    
     def __init__(self,  FieldAPI_pointers={}, top_level_routine=False):        
         self.FieldAPI_pointers = FieldAPI_pointers
         self.top_level_routine = top_level_routine
@@ -305,7 +305,14 @@ class MakeParallel(Transformation):
         
         new_region = FieldAPIPtr(pointerType='host').transform_node(new_region, routine)
         #new_region.apply( FieldAPIPtr(pointerType='host'))
+
+        add_suffix_transform = AddFieldAPISuffixToCalls(argument=boundary_variable.name) 
+        add_suffix_transform.transform_node(new_region, routine)
+        for subroutine in add_suffix_transform.routines_called:
+            self.addTransform(subroutine, 'FIELD_API')
         
+
+
         init_bounds = CallStatement(name = DeferredTypeSymbol( name='INIT',
                                                                parent = boundary_variable),
                                     arguments=(Variable(name=params.cpg_opts_variable)),

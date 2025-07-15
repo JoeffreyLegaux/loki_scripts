@@ -262,3 +262,15 @@ class FieldAPIPtr(Transformation):
 
     def transform_subroutine(self, routine, **kwargs):
         self.transform_node(routine, routine, inplace=True)
+
+        # Add JBLK and JBLK = YCDPG_BNDS%KBL
+        if 'YDCPG_BNDS' in [arg.name for arg in routine.arguments]:
+
+            if params.block_counter not in [v.name for v in routine.variables]:
+                routine.variables += (Variable(name=params.block_counter,
+                                               type=SymbolAttributes(BasicType.INTEGER, kind=Variable(name='JPIM'))),)
+
+            routine.body.prepend(Assignment(lhs=Variable(name=params.block_counter),
+                                             rhs=Variable(name='KBL', parent= Variable(name='YDCPG_BNDS'))))
+
+
