@@ -7,6 +7,7 @@ class params_class:
   nproma_aliases = ["KLON","YDCPG_OPTS%KLON","YDGEOMETRY%YRDIM%NPROMNH","YDGEOMETRY%YRDIM%NPROMA","KPROMA", "YDDIM%NPROMA", "NPROMA","KSYS"]
   nproma_bounds = [["KIDIA", "YDCPG_BNDS%KIDIA","KST","KFIRST"],["KFDIA", "YDCPG_BNDS%KFDIA","KEND"]]
   nproma_loop_indices = ['JLON','JROF']
+  vertical_loop_indices = ['JLEV']
   cpg_opts_variable = 'YDCPG_OPTS'
   block_dimension = 'YDCPG_OPTS%KGPBLKS'
   block_counter = 'JBLK'
