@@ -563,7 +563,8 @@ class MakeSync(Transformation):
                         fAPI_member = self.get_fieldAPI_member(arg)
                         if fAPI_member :
                             args_to_fAPI[arg] = Variable(name = fAPI_member[0], parent=arg.parent, scope=routine)
-                            fAPI_arrays_in_calls.add((args_to_fAPI[arg], fAPI_member[1] ) )
+                            # Save its shape for later default FIELD_NEW calls
+                            fAPI_arrays_in_calls.add((args_to_fAPI[arg], fAPI_member[1], arg.name))
                 
                 if args_to_fAPI or args_to_pointers :
                     assignments = []
@@ -686,7 +687,7 @@ class MakeSync(Transformation):
         routine.body = Transformer(calls_map).visit(routine.body)
 
         
-       
+        print("all them derived ? ", [n.name for n in self.derived_with_indexes])
         
         # Unused FieldAPI arrays might have not been created on the GPU side
         # However these arrays might be passed to subroutine calls inside GPU kernels
@@ -698,7 +699,7 @@ class MakeSync(Transformation):
 
         # Overall, it would be better to have that done systemically at the creation of the type.
         if self.callSuffix == 'SYNC_DEVICE' or self.callSuffix == 'SYNC_HOST':
-            for (array,size) in fAPI_arrays_in_calls:
+            for (array,size,original_name) in fAPI_arrays_in_calls:
                 bounds_kwargs = ( ( 'UBOUNDS', LiteralList(tuple([1 for s in range(size+1)])) ),)
                 field_new_call = CallStatement( name = DeferredTypeSymbol(name='FIELD_NEW'),
                                                 arguments = array,
@@ -716,7 +717,24 @@ class MakeSync(Transformation):
                 else : 
                     cond = Conditional(condition=LogicalNot(associate_call), body = (field_new_call,))
 
-                routine.body.append(cond)
+                # If the variable uses a array of derived type, we must create a loop over its index
+                if original_name in [v.name for v in  self.derived_with_indexes]:
+                    parent = array.parent
+                    # If flagged as derived type with index, there must be a parent with index
+                    while str(parent) == parent.name:
+                        parent = parent.parent
+                    #print("parent found : ", parent, type(parent), parent.dimensions[0])
+                
+                    loop = Loop(variable=parent.dimensions[0],  
+                                bounds = LoopRange((IntLiteral(1), 
+                                                    InlineCall(function=DeferredTypeSymbol('SIZE'), 
+                                                                parameters = (parent.clone(dimensions=None),)) 
+                                                   )), 
+                                body = cond)
+                
+                    routine.body.append(loop)
+                else:
+                    routine.body.append(cond)
       
 
             # We need FIELD_FACTORY_MODULE for FIELD_NEW
