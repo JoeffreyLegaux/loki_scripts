@@ -82,14 +82,15 @@ def attach_acdc_regions(routine):
                 start = pragma
             elif ('}' in pragma.content):
                 if (not start):
-                    print("ACDC } without previous {")
+                    print(colored('ACDC } without previous { !!!!', "red"))
+                    exit(0)
                 else:
-                    print("ACDC pragma region identified")
+                    print(colored(f'ACDC pragma region identified : {start.content}, {pragma.content}', "green"))
                     # extract_pragma_region(routine.body, start=start, end=pragma)
                     pairs.append((start,pragma))
                     start = None
         else:
-            print('Unknown pragma found : {pragma}')
+            print(colored(f'Unknown pragma found : {pragma}', "red"))
 
     PragmaRegionAttacher(pragma_pairs=pairs, inplace=True).visit(routine.body)
 
@@ -136,14 +137,15 @@ greedy_process = True #False #True
 
 while (len(routines_to_transform) > 0):
     routine_name =  next(iter(routines_to_transform))
-    print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-    print("Treating ", routine_name)
-    print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+
+    print(colored( '\n' + '+' * 100, "light_blue"))
+    print(colored(f'+++    Treating routine {routine_name}' + ' ' * (100-(27+len(routine_name))) + '+++', "light_blue"))
+    print(colored( '+' * 100 + '\n', "light_blue"))
     transformations_to_generate = routines_to_transform[routine_name]
 
     # Remove routine from the list. If new transformations arise, treat them in the next pass
     routines_to_transform.pop(routine_name)
-    print("Transformations to generate : ", transformations_to_generate) 
+    print(colored(f'Transformations to generate : {transformations_to_generate} \n', "cyan")) 
     #print("treated routines : ", treated_routines)    
     if routine_name not in params.routines_to_files:
         print(f'ERROR : routine {routine} not found in files list !!!')
@@ -170,9 +172,11 @@ while (len(routines_to_transform) > 0):
         
         (FieldAPI_pointers, FieldAPI_pointers_names) = get_pointers_to_FieldAPI(routine, params.nproma_aliases)
 
-        print("FieldAPI_pointers found in acdc_pragmes : ", FieldAPI_pointers, type(FieldAPI_pointers))
+        if ( len(FieldAPI_pointers) > 0) :
+            print("FieldAPI_pointers found in routine : ", FieldAPI_pointers, type(FieldAPI_pointers))
        
-
+        
+        print(colored(f'\n  =====   Applying transformation {transform}  ===== \n', "light_magenta"))
         if (transform == 'FIELD_API'):
             #filename = '../loki_outputs/' + file[10:-4] + '_field_api_host.F90'
             filename = output_path_sources + file_without_path[:-4] + '_field_api.F90'
@@ -211,23 +215,17 @@ while (len(routines_to_transform) > 0):
                 new_routine.apply(transfodep, role='kernel')
  
                 # Get contained routines back
-                #new_routine.contains = routine.contains
-                #new_routine.apply(AddSuffixToCalls(suffix='_FIELD_API_HOST'))
+                new_routine.contains = routine.contains
             
-                print("writing to file : ", filename)
+                print(colored(f'writing to file : {filename}', "light_green"))
                 f.write(new_routine.to_fortran())
             f.write('\n') #Add eol so vim doesn't complain
             f.close()
 
         elif (transform == 'SCC_HOST' or transform == 'SCC_DEVICE'):
-            print(f'call {transform} ')
-            print("====_____________================______________================______________=================")
             with Timer(logger=acdc_logger, text=f'[ACDC] {transform} complete transformation' + ' in {:.2f}s'):
                 isHost = (transform == 'SCC_HOST')
-                # suffix='_SINGLE_COLUMN_FIELD_API_' + ('HOST' if isHost else 'DEVICE')
                 #filename = output_path + file[:-4] + '_scc' + ('_host.F90' if isHost else '_device.F90')
-
-                #filename = (source_path + file[:-4]).replace('main', 'local') + '_scc' + ('_host.F90' if isHost else '_device.F90')
                 filename = output_path_sources + file_without_path[:-4] + '_scc' + ('_host.F90' if isHost else '_device.F90')
                 f = open(filename, 'w')
                 if True:
@@ -246,9 +244,6 @@ while (len(routines_to_transform) > 0):
                     with Timer(logger=acdc_logger, text='[ACDC] scc_transform_routine in {:.2f}s'):
                         scc_transform_routine(new_routine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols, FieldAPI_pointers=FieldAPI_pointers)
                     
-                    #with Timer(logger=acdc_logger, text='[ACDC] FieldAPIPtr transform in {:.2f}s'):
-                    #    new_routine.apply(FieldAPIPtr(pointerType='host' if isHost else 'device'))
-
                     # Change called subroutines names, import their interface and add !$acc routine directives if relevant
                     add_suffix_transform =(AddSuffixToCalls(suffix='_'+transform, additional_kwvariables=[('YDSTACK','YLSTACK')]))
                     new_routine.apply(add_suffix_transform)
@@ -269,7 +264,7 @@ while (len(routines_to_transform) > 0):
                     alloc_temp(new_routine)
                     assoc_alloc_pt(new_routine, FieldAPI_pointers_names)
                 
-                    print("writing to file : ", filename)
+                    print(colored(f'writing to file : {filename}', "light_green"))
                     f.write(new_routine.to_fortran())
 
                     
@@ -279,8 +274,6 @@ while (len(routines_to_transform) > 0):
 
 
         elif (transform == 'SYNC_DEVICE' or transform == 'SYNC_HOST'):
-            print(f'call {transform} ')
-            print("====_____________================______________================______________=================")
             isHost = (transform == 'SYNC_HOST')
             #filename = output_path + file[:-4] + ('_sync_host.F90' if isHost else '_sync_device.F90')
             filename = output_path_sources + file_without_path[:-4] + ('_sync_host.F90' if isHost else '_sync_device.F90')
@@ -300,7 +293,6 @@ while (len(routines_to_transform) > 0):
                 new_routine.apply(RemoveLoops(indices=params.nproma_loop_indices + params.vertical_loop_indices))
                 add_suffix_transform = AddSuffixToCalls(suffix='_SYNC_HOST' if isHost else '_SYNC_DEVICE')
                 new_routine.apply(add_suffix_transform)
-                print("after add suffix")
                 
                 if greedy_process:
                     for subroutine in add_suffix_transform.routines_called:
@@ -319,7 +311,8 @@ while (len(routines_to_transform) > 0):
                                                          include_path=output_path_interfaces)
                 new_routine.apply(transfodep, role='kernel')
                 
-                print("writing to file : ", filename)
+
+                print(colored(f'writing to file : {filename}', "light_green"))
                 f.write(new_routine.to_fortran())
             
                 add_to_treated(routine_name, {transform})
@@ -329,12 +322,9 @@ while (len(routines_to_transform) > 0):
 
 
         elif (transform == 'ABORT') : #and routine not in params.ignore_abort):
-            print(f'call {transform} ')
-            print("====_____________================______________================______________=================")
             #filename = output_path + file[:-4] + '_abort.F90'
-            print("source path ", source_path)
             filename = output_path_sources + file_without_path[:-4] + '_abort.F90'
-            print("ouput file opened : ", filename)
+            #print("ouput file opened : ", filename)
             f = open(filename, 'w')
             if True:
             #for routine in routines:
@@ -366,7 +356,7 @@ while (len(routines_to_transform) > 0):
                 transfodep = DependencyTransformation(suffix='_ABORT', include_path=output_path_interfaces)
                 new_routine.apply(transfodep, role='kernel')
 
-                print("writing to file : ", filename)
+                print(colored(f'writing to file : {filename}', "light_green"))
                 f.write(new_routine.to_fortran())
 
                 add_to_treated(routine_name, {'ABORT'})
@@ -376,11 +366,9 @@ while (len(routines_to_transform) > 0):
 
 
         elif (transform == 'PARALLEL'):
-            print(f'call {transform} ')
-            print("====_____________================______________================______________=================")
             #filename = output_path + file[:-4] + '_parallel.F90'
             filename = output_path_sources + file_without_path[:-4] + '_parallel2.F90'
-            print("ouput file opened : ", filename)
+            #print("ouput file opened : ", filename)
             f = open(filename, 'w')
             if True:
             #for routine in routines:
@@ -409,7 +397,7 @@ while (len(routines_to_transform) > 0):
                 transfodep = DependencyTransformation(suffix='_PARALLEL2', include_path=output_path_interfaces)
                 new_routine.apply(transfodep, role='kernel')
                 
-                print("writing to file : ", filename)
+                print(colored(f'writing to file : {filename}', "light_green"))
                 f.write(new_routine.to_fortran())
 
 

@@ -129,7 +129,6 @@ class MakeSync(Transformation):
 
     # def findAssigns(self, node, balise, depth) : 
     def findAssigns(self, node) : 
-        #print("find ", type(node))        
         if isinstance(node, tuple):
             # sequence of actual nodes : get the list of unique reads and writes from each node
 
@@ -162,9 +161,8 @@ class MakeSync(Transformation):
         # Assignments never exist by themselves, they are part of a section (routine, condition or loop body...)
         # Therefore we do not save anything at those nodes except for static operations that should stay in place
         elif isinstance(node, Assignment):
-            #print("assing : ", node)
             if node.ptr :
-                print("node ptr : ", node)
+                #print("node ptr : ", node)
                 return([], [], [], [])
             else :
                 #print("defines ? ", [s.name for s in node.defines_symbols])
@@ -189,7 +187,7 @@ class MakeSync(Transformation):
                             if test ]                        
                
                 if (reads == [] and writes == []):
-                    print("assignement without fieldapi : ", node)
+                    #print("assignement without fieldapi : ", node)
                     self.map_static[node] = []
                     return ([], [], [], [])
 
@@ -276,7 +274,6 @@ class MakeSync(Transformation):
             
             return(all_reads, all_writes, [], [])
         elif isinstance(node, MultiConditional):
-            print("multicond : ", node)
             first_body = True
             for body in node.bodies:
                 (if_reads, if_writes, *_) = self.findAssigns(body)
@@ -371,7 +368,6 @@ class MakeSync(Transformation):
                     if not empty_c:
                         empty = False
                         if c in self.map_static and self.map_static[c] != [] :
-                            print("node static", c)
                             self.map_nodes[c] = None
                             #print("map static du sous-node :",  self.map_static[c])
                             for (var, rw, _) in self.map_static[c]:
@@ -379,9 +375,7 @@ class MakeSync(Transformation):
                                 self.map_nodes[node] += (self.createSyncCallStatement(var, rw), )
 
                         else :
-                            print("node empty_c", c)
                             self.map_nodes[node] += (c,)
-
 
 
                 for w in new_writes:
@@ -499,7 +493,6 @@ class MakeSync(Transformation):
                 if var.name not in [v.name for v in  self.derived_with_indexes]:
                     self.derived_with_indexes.add(var)
 
-        print (colored(f'Sync transform : deirved types with indexes found  : {self.derived_with_indexes} ', 'green'))
 
         # We will very likely transform some variables into FIELD_BASIC
         #routine.spec.prepend(Import(module="FIELD_MODULE", symbols=(DeferredTypeSymbol(name='FIELD_BASIC'),)))
@@ -686,8 +679,6 @@ class MakeSync(Transformation):
         # for the rest of the process
         routine.body = Transformer(calls_map).visit(routine.body)
 
-        
-        print("all them derived ? ", [n.name for n in self.derived_with_indexes])
         
         # Unused FieldAPI arrays might have not been created on the GPU side
         # However these arrays might be passed to subroutine calls inside GPU kernels

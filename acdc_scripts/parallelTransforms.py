@@ -453,10 +453,8 @@ class MakeParallel(Transformation):
             self.addTransform(subroutine, 'SYNC_' + target)
         sync_routine.apply(RemoveUnusedImports())
            
-        print("makesync")
         syncTransformation = MakeSync(pointerType=target.lower(), sections = (sync_routine.body,), nproma_arrays=nproma_arrays )
         sync_routine.apply(syncTransformation)
-        print("after makesync, found ", syncTransformation.total_FAPI_pointers, " pointers")
 
         # We keep the maximum amount of local pointers needed to pass FieldAPI variables to Sync subroutines
         #total_FAPI_pointers = max (total_FAPI_pointers, syncTransformation.total_FAPI_pointers)
@@ -465,7 +463,6 @@ class MakeParallel(Transformation):
         sync_routine.apply(RemovePragmas())
         sync_routine.apply(RemoveEmptyConditionals())
 
-        print("sync routine built")
         #return (sync_name, syncTransformation.total_FAPI_pointers)
         # We insert the sync routine as a member routine of its caller
         # Therefore we do not need any variable passing or declaration as we manipulate only variables of the caller
@@ -488,7 +485,6 @@ class MakeParallel(Transformation):
         return True
 
     def makeParallelSubroutine(self, routine, region, region_num, local_boundary_variable, scc, target='host') :
-        print("make parallel subroutine : ", routine, target, region)
         # Optimisation : when a block only contains calls, simply transform the calls
         if self.containsOnlyCalls(region):
             new_region = FieldAPIPtr(pointerType=target).transform_node(region, routine)
@@ -619,7 +615,7 @@ class MakeParallel(Transformation):
         local_stack = Variable(name="YLSTACK", type=SymbolAttributes(DerivedType(name="STACK"), scope = routine))
 
         for region in FindNodes(PragmaRegion).visit(routine.body):
-            print("region : ", region.pragma, region.pragma.content)
+            #print("region : ", region.pragma, region.pragma.content)
             region_num = region_num + 1
 
             #(target, scc, outline, directive) = self.decodeParallelPragma(region.pragma.content)
@@ -628,7 +624,7 @@ class MakeParallel(Transformation):
             if not name:
                 name = f'REGION_{region_num}'
 
-            print("targets and name : ", targets, name)
+            #print("targets and name : ", targets, name)
    
             archs = [False, False]
             for target in targets:  
@@ -647,11 +643,10 @@ class MakeParallel(Transformation):
                 (sync_names[1], sync_FAPI_pointers) = self.makeSyncRegion(routine, 'DEVICE', region_num, region.body, unmodified_spec, nproma_arrays)
                 total_FAPI_pointers = max (total_FAPI_pointers, sync_FAPI_pointers)
 
-            print("sync_names ? ", sync_names)
              
             abort_calls=()
             for call in FindNodes(CallStatement).visit(region.body):
-                print("call in region : ", call)
+                #print("call in region : ", call)
                 if call.name not in params.ignore_abort:
                     self.addTransform(call.name.name, 'ABORT')
                     # Adjust arguments : variables turned into fieldAPI should now pass their PTR
