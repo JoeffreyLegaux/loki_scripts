@@ -531,7 +531,9 @@ class MakeParallel(Transformation):
 
             new_subroutine.apply(RemoveComments())
             new_subroutine.apply(RemovePragmas())
-            new_subroutine.apply(FieldAPIPtr(pointerType=target))  
+            
+            # Only apply node FieldAPIPtr transformation : we do not want to insert JBLK declaration and assignment
+            new_subroutine.body = FieldAPIPtr(pointerType=target).transform_node(new_subroutine.body, new_subroutine)
         
             return new_subroutine.body
         # self.outlined_routines.append(new_subroutine)
