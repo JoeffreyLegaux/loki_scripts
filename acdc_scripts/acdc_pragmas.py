@@ -112,9 +112,9 @@ output_path_interfaces = output_path + 'ifsaux/loki_interfaces/'
 # Start at CPG_DYN_SLG with empty list of forced transformations
 
 routines_to_transform = {}
-#routines_to_transform['CPG_DYN_SLG']={'PARALLEL'}
+routines_to_transform['CPG_DYN_SLG']={'PARALLEL'}
 routines_to_transform['LACDYN'] ={'PARALLEL'}
-#routines_to_transform['LACDYN'] ={'SYNC_DEVICE'}
+#routines_to_transform['LACDYN'] ={'SYNC_HOST', 'SYNC_DEVICE'}
 #routines_to_transform['LASSIE']={'ABORT','PARALLEL'}
 #routines_to_transform['LAVENT']={'ABORT','PARALLEL'}
 #routines_to_transform['LAVABO']={'ABORT','PARALLEL'}
@@ -129,7 +129,7 @@ treated_routines = {}
 #routines_to_transform['LAVABO_EXPL_LAITVSPCQM_PART1']={'SYNC_HOST'}
 #routines_to_transform['VERDISINT']={'ABORT'}
 
-#routines_to_transform['LATTEX_EXPL_2TL']={'PARALLEL'}
+#routines_to_transform['LATTEX_EXPL_VSPLTRANS']={'SYNC_HOST'}
 # If set to False, only apply transformation listed in routines_to_transform
 # If set to True, enqueue subroutines called during a transformation for further transformation
 greedy_process = True #False #True
