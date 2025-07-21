@@ -380,8 +380,9 @@ class MakeParallel(Transformation):
         # YLCPG_BNDS%KFDIA = JLON
         assignments += (Assignment( lhs = Variable(name='KFDIA', parent = boundary_variable), 
                                     rhs = Variable(name='JLON') ), )
-        # Compute local stack variables boundaries
-        #assignments += (Assignment( lhs = Variable(name='YLSTACK'), rhs = Variable(name='YDSTACK')), )
+        # YLCPG_BNDS%KBL = JBLK
+        assignments += (Assignment( lhs = Variable(name='KBL', parent = boundary_variable),
+                                                      rhs = Variable(name='JBLK') ), )
 
         # YLSTACK%L8 = stack_l8 (YSTACK, JBLK-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)
         l8_string = f'stack_l8 (YSTACK, {params.block_counter}-YDCPG_OPTS%JBLKMIN+1, YDCPG_OPTS%KGPBLKS)'
