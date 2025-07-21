@@ -493,7 +493,8 @@ class MakeParallel(Transformation):
             new_region = add_suffix_transform.transform_node(new_region, routine)
                 
             for call in FindNodes(CallStatement).visit(new_region.body):
-                ReplaceArguments(call, {'YDCPG_BNDS%KIDIA':Variable(name='KIDIA', parent = local_boundary_variable), \
+                ReplaceArguments(call, {'YDCPG_BNDS':local_boundary_variable, \
+                                        'YDCPG_BNDS%KIDIA':Variable(name='KIDIA', parent = local_boundary_variable), \
                                         'YDCPG_BNDS%KFDIA':Variable(name='KFDIA', parent = local_boundary_variable)})
       
             for subroutine in add_suffix_transform.routines_called:
@@ -511,7 +512,8 @@ class MakeParallel(Transformation):
             new_subroutine = add_suffix_transform.transform_node(new_subroutine, routine)
 
             for call in FindNodes(CallStatement).visit(new_subroutine.body):
-                ReplaceArguments(call, {'YDCPG_BNDS%KIDIA':Variable(name='KIDIA', parent = local_boundary_variable), \
+                ReplaceArguments(call, {'YDCPG_BNDS':local_boundary_variable, \
+                                        'YDCPG_BNDS%KIDIA':Variable(name='KIDIA', parent = local_boundary_variable), \
                                         'YDCPG_BNDS%KFDIA':Variable(name='KFDIA', parent = local_boundary_variable)})
 
             for subroutine in add_suffix_transform.routines_called:
