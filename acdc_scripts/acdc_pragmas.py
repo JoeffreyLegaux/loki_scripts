@@ -99,10 +99,9 @@ true_symbols, false_symbols=logical_lst.symbols()
 
 acdc_logger = info # perf pour log fichier
 
-#source_path = '../../loki_WIP/src/local/'
-source_path = '../../loki_WIP/src/'
+source_path = '../../loki_big_kernel/src/'
+#source_path = '../../loki_small_kernels_2/src/'
 
-#output_path = source_path + '/local/'
 output_path = source_path + 'local/'
 
 
@@ -114,23 +113,20 @@ output_path_interfaces = output_path + 'ifsaux/loki_interfaces/'
 
 routines_to_transform = {}
 routines_to_transform['CPG_DYN_SLG']={'PARALLEL'}
-routines_to_transform['LACDYN'] ={'PARALLEL'}
-#routines_to_transform['LACDYN'] ={'SYNC_HOST', 'SYNC_DEVICE'}
-#routines_to_transform['LASSIE']={'ABORT','PARALLEL'}
-#routines_to_transform['LAVENT']={'ABORT','PARALLEL'}
-#routines_to_transform['LAVABO']={'ABORT','PARALLEL'}
-#routines_to_transform['LASURE'] = {'SCC_HOST','SCC_DEVICE'}
-#routines_to_transform['LATTES']={'ABORT','PARALLEL'}
+#routines_to_transform['LACDYN'] ={'PARALLEL'}
+#routines_to_transform['LACDYN'] ={'SCC_HOST', 'SCC_DEVICE'}
+#routines_to_transform['LACDYN'] ={'SYNC_DEVICE'}
+#routines_to_transform['LASSIE']={'PARALLEL'}
+#routines_to_transform['LAVENT']={'PARALLEL'}
+#routines_to_transform['LAVABO']={'PARALLEL'}
+#routines_to_transform['LASURE'] = {'SCC_HOST'}
+#routines_to_transform['LATTES']={'PARALLEL'}
 #routines_to_transform['LATTEX']={'ABORT','PARALLEL'}
 #routines_to_transform['LATTEX']={'PARALLEL'}
 #routines_to_transform = {'VERDISINT':{'ABORT'}}
 treated_routines = {}
 
 
-#routines_to_transform['LAVABO_EXPL_LAITVSPCQM_PART1']={'SYNC_HOST'}
-#routines_to_transform['VERDISINT']={'ABORT'}
-
-#routines_to_transform['LATTEX_EXPL_VSPLTRANS']={'SYNC_HOST'}
 # If set to False, only apply transformation listed in routines_to_transform
 # If set to True, enqueue subroutines called during a transformation for further transformation
 greedy_process = True #False #True
@@ -245,6 +241,10 @@ while (len(routines_to_transform) > 0):
                         scc_transform_routine(new_routine, params.nproma_aliases, params.nproma_loop_indices, params.nproma_bounds, true_symbols, false_symbols, FieldAPI_pointers=FieldAPI_pointers)
                     
                     # Change called subroutines names, import their interface and add !$acc routine directives if relevant
+
+                    with Timer(logger=acdc_logger, text='[ACDC] FieldAPIPtr transform in {:.2f}s'):
+                        new_routine.apply(FieldAPIPtr(pointerType='host' if isHost else 'device'))
+
                     add_suffix_transform =(AddSuffixToCalls(suffix='_'+transform, additional_kwvariables=[('YDSTACK','YLSTACK')]))
                     new_routine.apply(add_suffix_transform)
                     
