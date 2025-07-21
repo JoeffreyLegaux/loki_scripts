@@ -1,0 +1,303 @@
+SUBROUTINE RADAER_OPENACC (YDEAERD, YDERAD, YDPHY, KIDIA, KFDIA, KLON, KLEV, PAPRS, PAPRSF, PT, PTS, PAESEA, PAELAN, PAESOO,  &
+& PAEDES, PAESUL, PAEVOL, PAER, PAERINDS, YDSTACK)
+  
+  ! ======================================================================
+  
+  !**** *RADAER  - COMPUTES DISTRIBUTION OF AEROSOLS
+  
+  !     PURPOSE.
+  !     --------
+  
+  !     - USE THE ECMWF CLIMATOLOGICAL AEROSOLS DISTRIBUTION
+  !                   SEE TANRE ET AL., 1984
+  !     - AVOID THE USE OF RADACT WHICH DOES NOT WORK ON A
+  !                   NON-ROTATED, UNSTRETCHED GRID.
+  
+  !     WARNING.
+  !     --------
+  
+  !     RADAER HAS BEEN TESTED FOR ARPEGE-CLIMAT ONLY. IN PARTICULAR
+  !     ONE SHOULD BE CAREFUL WHEN USING IT WITH SPACE INTERPOLATION
+  !     OR MEMORY PARTITION (SEE RADINT).
+  
+  !**   INTERFACE.
+  !     ----------
+  
+  !     CALL *RADAER* FROM *APLPAR*
+  
+  !        EXPLICIT ARGUMENTS :
+  !        --------------------
+  
+  !        ==== INPUTS ===
+  
+  ! KIDIA  : LATITUDE INDEX OF 1-ST LATITUDE BAND IN VECTOR
+  ! KFDIA  : LATITUDE INDEX OF LAST LATITUDE BAND IN VECTOR
+  ! KLON   : VECTOR LENGTH
+  ! KLEV   : NUMBER OF LEVELS
+  ! PAPRS  : (KLON,KLEV+1)      ; HALF LEVEL PRESSURE
+  ! PAPRSF : (KLON,KLEV )       ; FULL LEVEL PRESSURE
+  ! PT     : (KLON,KLEV)        ; FULL LEVEL TEMPERATURE
+  ! PTS    : (KLON)             ; SURFACE TEMPERATURE
+  ! PAESOO : (KLON)             ; SOOT AEROSOLS
+  ! PAELAN : (KLON)             ; LAND AEROSOLS
+  ! PAESEA : (KLON)             ; SEA AEROSOLS
+  ! PAEDES : (KLON)             ; DESERT AEROSOLS
+  ! PAESUL : (KLON)             ; SULFAT AEROSOLS
+  ! PAEVOL : (KLON)             ; VOLCANO AEROSOLS
+  
+  !        ==== OUTPUT ===
+  
+  ! PAER   : (KLON,KLEV,6)      ; OPTICAL THICKNESS OF THE AEROSOLS
+  ! PAERINDS : (KLON,KLEV)      ; OPTICAL THICKNESS OF THE SULFATE AEROSOL
+  !                               ; USED FOR COMPUTATION OF ITS INDIRECT EFFECT
+  
+  !        IMPLICIT ARGUMENTS
+  !        --------------------
+  
+  !        NONE
+  
+  !     METHOD.
+  !     -------
+  
+  !     LAND, SEA, SOOT AND DESERT AEROSOLS DISTRIBUTIONS ARE RED
+  !     FROM A FILE CONTAINING VARIOUS CLIMATOLOGIES AND COMBINED
+  !     HERE WITH VERTICAL PROFILES TO GET THE 3D DISTRIBUTION.
+  
+  !     EXTERNALS.
+  !     ----------
+  
+  !     NONE
+  
+  !     REFERENCE.
+  !     ----------
+  
+  !     SEE RADIATION'S PART OF THE MODEL'S DOCUMENTATION AND
+  !     ECMWF RESEARCH DEPARTMENT DOCUMENTATION OF THE "I.F.S"
+  !     FOR RADACT
+  !     J.-J. MORCRETTE E.C.M.W.F.   91/03/15 ORIGINAL RADACT SUBROUTINE
+  
+  !     AUTHOR.
+  !     -------
+  
+  !     Ph. DANDIN      METEO-FRANCE 94/11/14 AEROSOLS OUT OF RADINT
+  
+  !     MODIFICATIONS.
+  !     --------------
+  !     M.Hamrud      01-Oct-2003 CY28 Cleaning
+  !     04/09 : F. BOUYSSEL - USE OF TEGEN'S AEROSOLS (LNEWAER)
+  !     09/09 : A.Alias  - SULFAT AEROSOLS (combined to land) (J.F.Gueremy)
+  !                      - PAEVOL  put in stratospheric aerosols category
+  !                                instead of  RCSTBGA=cste (A.Voldoire)
+  !     09/07 : A. VOLDOIRE  - Add a table for sulfate aerosols alone
+  !                            used for indirect effect calculation only
+  !                            For the direct effect, sulfate aerosols are
+  !                            mixed with Land aerosols
+  !-----------------------------------------------------------------------
+  
+!$acc routine( RADAER_OPENACC ) seq
+  
+  USE PARKIND1, ONLY: JPIM, JPRB
+  USE YOMHOOK, ONLY: DR_HOOK, JPHOOK, LHOOK
+  USE YOEAERD, ONLY: TEAERD
+  USE YOERAD, ONLY: TERAD
+  USE YOMPHY, ONLY: TPHY
+  
+  USE STACK_MOD
+#include "stack.h"
+  
+  IMPLICIT NONE
+  
+  TYPE(TEAERD), INTENT(IN) :: YDEAERD
+  TYPE(TERAD), INTENT(IN) :: YDERAD
+  TYPE(TPHY), INTENT(IN) :: YDPHY
+  INTEGER(KIND=JPIM), INTENT(IN) :: KIDIA
+  INTEGER(KIND=JPIM), INTENT(IN) :: KFDIA
+  INTEGER(KIND=JPIM), INTENT(IN) :: KLON
+  INTEGER(KIND=JPIM), INTENT(IN) :: KLEV
+  REAL(KIND=JPRB), INTENT(IN) :: PAPRS(KLON, KLEV + 1)
+  REAL(KIND=JPRB), INTENT(IN) :: PAPRSF(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PT(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PTS(KLON)
+  REAL(KIND=JPRB), INTENT(IN) :: PAESEA(KLON)
+  REAL(KIND=JPRB), INTENT(IN) :: PAELAN(KLON)
+  REAL(KIND=JPRB), INTENT(IN) :: PAESOO(KLON)
+  REAL(KIND=JPRB), INTENT(IN) :: PAEDES(KLON)
+  REAL(KIND=JPRB), INTENT(IN) :: PAESUL(KLON)
+  REAL(KIND=JPRB), INTENT(IN) :: PAEVOL(KLON)
+  REAL(KIND=JPRB), INTENT(OUT) :: PAER(KLON, KLEV, 6)
+  REAL(KIND=JPRB), INTENT(OUT) :: PAERINDS(KLON, KLEV)
+  !     -----------------------------------------------------------------
+  
+  !*       0.1   ARGUMENTS.
+  !              ----------
+  
+  !     -----------------------------------------------------------------
+  
+  !*       0.2   LOCAL ARRAYS.
+  !              -------------
+  
+  temp (REAL (KIND=JPRB), ZTH, (KLON, KLEV + 1))
+  
+  REAL(KIND=JPRB) :: ZDPN
+  REAL(KIND=JPRB) :: ZDPO
+  REAL(KIND=JPRB) :: ZAEQSN
+  REAL(KIND=JPRB) :: ZAEQSO
+  REAL(KIND=JPRB) :: ZAEQLN
+  REAL(KIND=JPRB) :: ZAEQLO
+  REAL(KIND=JPRB) :: ZAEQUN
+  REAL(KIND=JPRB) :: ZAEQUO
+  REAL(KIND=JPRB) :: ZAEQDN
+  REAL(KIND=JPRB) :: ZAEQDO
+  REAL(KIND=JPRB) :: ZAETRN
+  REAL(KIND=JPRB) :: ZAETRO
+  REAL(KIND=JPRB) :: ZAEQFN
+  REAL(KIND=JPRB) :: ZAEQFO
+  REAL(KIND=JPRB) :: ZTOT
+  
+  INTEGER(KIND=JPIM) :: JLEV
+  INTEGER(KIND=JPIM) :: JLON
+  INTEGER(KIND=JPIM) :: JAER
+  
+  REAL(KIND=JPRB) :: ZAETR
+  REAL(KIND=JPRB) :: ZDPNMO
+  REAL(KIND=JPRB) :: ZGRTH
+  REAL(KIND=JPRB) :: ZREPAER
+  REAL(KIND=JPHOOK) :: ZHOOK_HANDLE
+  TYPE(STACK), INTENT(IN) :: YDSTACK
+  TYPE(STACK) :: YLSTACK
+  YLSTACK = YDSTACK
+  IF (KIND (ZTH) == 8) THEN
+    alloc8 (ZTH)
+  ELSE
+    IF (KIND (ZTH) == 4) THEN
+      alloc4 (ZTH)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  JLON = KIDIA
+  
+  !     ------------------------------------------------------------------
+  
+  !*         1.     AEROSOL PARAMETERS COMPUTATIONS
+  !                 -------------------------------
+  
+  ! Aerosols come from files containing the climatologies.
+  
+  !*         2.      VERTICAL DISTRIBUTION
+  !*                 ---------------------
+  
+  !*         2.1    HALF-LEVEL TEMPERATURE
+  !*          =     TEMPERATURES AT LAYERS' BOUNDARIES.
+  
+  ! Half-level temperature interpolation weighted by pressure
+  ! just as in RADINT (loop 1222) but shortened...
+  
+  ZREPAER = 1.E-12_JPRB
+  DO JLEV=2,KLEV
+    ZTH(JLON, JLEV) = (PT(JLON, JLEV - 1)*PAPRSF(JLON, JLEV - 1)*(PAPRSF(JLON, JLEV) - PAPRS(JLON, JLEV)) + PT(JLON, JLEV) &
+    & *PAPRSF(JLON, JLEV)*(PAPRS(JLON, JLEV) - PAPRSF(JLON, JLEV - 1)))*(1.0_JPRB / (PAPRS(JLON, JLEV)*(PAPRSF(JLON, JLEV) -  &
+    & PAPRSF(JLON, JLEV - 1))))
+  END DO
+  
+  ZTH(JLON, KLEV + 1) = PTS(JLON)
+  ZTH(JLON, 1) = PT(JLON, 1) - PAPRSF(JLON, 1)*(PT(JLON, 1) - ZTH(JLON, 2)) / (PAPRSF(JLON, 1) - PAPRS(JLON, 2))
+  
+  !*         2.2    VERTICAL DISTRIBUTIONS
+  
+  ZDPO = PAPRS(JLON, 1)
+  IF (YDERAD%LNEWAER) THEN
+    ZAEQSO = PAESEA(JLON)*YDEAERD%CVDAES(1)
+    IF (YDPHY%LAEROSUL) THEN
+      ZAEQLO = (PAELAN(JLON) + PAESUL(JLON))*YDEAERD%CVDAEL(1)
+      ZAEQFO = PAESUL(JLON)*YDEAERD%CVDAEL(1)
+    ELSE
+      ZAEQLO = PAELAN(JLON)*YDEAERD%CVDAEL(1)
+      ZAEQFO = 0._JPRB
+    END IF
+    ZAEQUO = PAESOO(JLON)*YDEAERD%CVDAEU(1)
+    ZAEQDO = PAEDES(JLON)*YDEAERD%CVDAED(1)
+  ELSE
+    ZAEQSO = YDEAERD%RCAEOPS*PAESEA(JLON)*YDEAERD%CVDAES(1)
+    ZAEQLO = YDEAERD%RCAEOPL*PAELAN(JLON)*YDEAERD%CVDAEL(1)
+    ZAEQUO = YDEAERD%RCAEOPU*PAESOO(JLON)*YDEAERD%CVDAEU(1)
+    ZAEQDO = YDEAERD%RCAEOPD*PAEDES(JLON)*YDEAERD%CVDAED(1)
+  END IF
+  ZAETRO = 1.0_JPRB
+  ZTOT = 0.0_JPRB
+  
+  DO JLEV=1,KLEV
+    ZGRTH = ZTH(JLON, JLEV) / ZTH(JLON, JLEV + 1)
+    ZDPN = PAPRS(JLON, JLEV + 1)
+    
+    IF (YDERAD%LNEWAER) THEN
+      ZAEQSN = PAESEA(JLON)*YDEAERD%CVDAES(JLEV + 1)
+      IF (YDPHY%LAEROSUL) THEN
+        ZAEQLN = (PAELAN(JLON) + PAESUL(JLON))*YDEAERD%CVDAEL(JLEV + 1)
+        ZAEQFN = PAESUL(JLON)*YDEAERD%CVDAEL(JLEV + 1)
+      ELSE
+        ZAEQLN = PAELAN(JLON)*YDEAERD%CVDAEL(JLEV + 1)
+        ZAEQFN = 0._JPRB
+      END IF
+      ZAEQUN = PAESOO(JLON)*YDEAERD%CVDAEU(JLEV + 1)
+      ZAEQDN = PAEDES(JLON)*YDEAERD%CVDAED(JLEV + 1)
+    ELSE
+      ZAEQSN = YDEAERD%RCAEOPS*PAESEA(JLON)*YDEAERD%CVDAES(JLEV + 1)
+      ZAEQLN = YDEAERD%RCAEOPL*PAELAN(JLON)*YDEAERD%CVDAEL(JLEV + 1)
+      ZAEQUN = YDEAERD%RCAEOPU*PAESOO(JLON)*YDEAERD%CVDAEU(JLEV + 1)
+      ZAEQDN = YDEAERD%RCAEOPD*PAEDES(JLON)*YDEAERD%CVDAED(JLEV + 1)
+    END IF
+    
+    IF (0.5_JPRB*(PAPRS(JLON, JLEV) + PAPRS(JLON, JLEV + 1)) < 999._JPRB) THEN
+      ! for models with top above 10hPa
+      ZAETRN = 1.0_JPRB
+      ZAETRO = 1.0_JPRB
+    ELSE
+      ZAETRN = ZAETRO*MIN(1.0_JPRB, ZGRTH)**YDEAERD%RCTRPT
+    END IF
+    
+    ZAETR = SQRT(ZAETRN*ZAETRO)
+    ZDPNMO = ZDPN - ZDPO
+    ZTOT = ZTOT + ZAETR*ZDPNMO
+    IF (YDERAD%LNEWAER) THEN
+      PAERINDS(JLON, JLEV) = (1.0_JPRB - ZAETR)*(ZAEQFN - ZAEQFO)
+    END IF
+    PAER(JLON, JLEV, 1) = (1.0_JPRB - ZAETR)*(YDEAERD%RCTRBGA*ZDPNMO + ZAEQLN - ZAEQLO)
+    PAER(JLON, JLEV, 2) = (1.0_JPRB - ZAETR)*(ZAEQSN - ZAEQSO)
+    PAER(JLON, JLEV, 3) = (1.0_JPRB - ZAETR)*(ZAEQDN - ZAEQDO)
+    PAER(JLON, JLEV, 4) = (1.0_JPRB - ZAETR)*(ZAEQUN - ZAEQUO)
+    PAER(JLON, JLEV, 5) = ZAETR*YDEAERD%RCVOBGA*ZDPNMO
+    IF (YDPHY%LAEROVOL) THEN
+      PAER(JLON, JLEV, 6) = ZAETR*ZDPNMO*PAEVOL(JLON)
+    ELSE
+      PAER(JLON, JLEV, 6) = ZAETR*YDEAERD%RCSTBGA*ZDPNMO
+    END IF
+    ZDPO = ZDPN
+    ZAEQSO = ZAEQSN
+    ZAEQLO = ZAEQLN
+    ZAEQUO = ZAEQUN
+    ZAEQDO = ZAEQDN
+    ZAETRO = ZAETRN
+    IF (YDERAD%LNEWAER) THEN
+      ZAEQFO = ZAEQFN
+    END IF
+  END DO
+  
+  IF (YDPHY%LAEROVOL) THEN
+    PAER(JLON, :, 6) = PAER(JLON, :, 6) / ZTOT
+  END IF
+  
+  DO JLEV=1,KLEV
+    DO JAER=1,6
+      PAER(JLON, JLEV, JAER) = MAX(PAER(JLON, JLEV, JAER), ZREPAER)
+    END DO
+  END DO
+  
+  IF (YDERAD%LNEWAER) THEN
+    DO JLEV=1,KLEV
+      PAERINDS(JLON, JLEV) = MAX(PAERINDS(JLON, JLEV), ZREPAER)
+    END DO
+  END IF
+  !     ------------------------------------------------------------------
+  
+END SUBROUTINE RADAER_OPENACC

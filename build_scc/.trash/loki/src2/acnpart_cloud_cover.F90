@@ -1,0 +1,104 @@
+SUBROUTINE ACNPART_CLOUD_COVER_OPENACC (YDCST, YDML_PHY_MF, KIDIA, KFDIA, KLON, KTDIA, KLEV, PDECRDRED, PWMXOV, KL1, KL2,  &
+& PDECRD, PNEB, PAPRSF, PCLC, YDSTACK)
+  
+!$acc routine( ACNPART_CLOUD_COVER_OPENACC ) seq
+  
+  USE MODEL_PHYSICS_MF_MOD, ONLY: MODEL_PHYSICS_MF_TYPE
+  USE PARKIND1, ONLY: JPIM, JPRB
+  USE YOMHOOK, ONLY: LHOOK, DR_HOOK, JPHOOK
+  USE YOMCST, ONLY: TCST
+  
+  ! Interface:
+  ! ----------
+  ! INPUT:
+  !   KL1    - initial level
+  !   KL2    - final level
+  !   PNEB   - cloud cover on levels
+  !   PAPRSF - full level pressure
+  
+  ! OUTPUT:
+  !   PCLC   - cloud cover between model levels KL1 and KL2
+  
+  TYPE(TCST), INTENT(IN) :: YDCST
+  TYPE(MODEL_PHYSICS_MF_TYPE), INTENT(IN) :: YDML_PHY_MF
+  INTEGER(KIND=JPIM), INTENT(IN) :: KIDIA
+  INTEGER(KIND=JPIM), INTENT(IN) :: KFDIA
+  INTEGER(KIND=JPIM), INTENT(IN) :: KLON
+  INTEGER(KIND=JPIM), INTENT(IN) :: KTDIA
+  INTEGER(KIND=JPIM), INTENT(IN) :: KLEV
+  REAL(KIND=JPRB), INTENT(IN) :: PDECRDRED
+  REAL(KIND=JPRB), INTENT(IN) :: PWMXOV
+  
+  INTEGER(KIND=JPIM), INTENT(IN) :: KL1
+  INTEGER(KIND=JPIM), INTENT(IN) :: KL2
+  
+  REAL(KIND=JPRB), INTENT(IN) :: PDECRD
+  REAL(KIND=JPRB), INTENT(IN) :: PNEB(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PAPRSF(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(OUT) :: PCLC
+  
+  INTEGER(KIND=JPIM) :: JLON
+  INTEGER(KIND=JPIM) :: JLEV
+  
+  REAL(KIND=JPRB) :: ZCLOV
+  REAL(KIND=JPHOOK) :: ZHOOK_HANDLE
+  
+  REAL(KIND=JPRB) :: ZOVLP
+  USE STACK_MOD
+#include "stack.h"
+  
+  TYPE(STACK), INTENT(IN) :: YDSTACK
+  TYPE(STACK) :: YLSTACK
+  YLSTACK = YDSTACK
+  JLON = KIDIA
+  
+  
+  ! initialize cloud cover or its complement
+  IF (YDML_PHY_MF%YRPHY%LRNUMX .and. YDML_PHY_MF%YRPHY%LACPANMX) THEN
+    PCLC = 1._JPRB - PNEB(JLON, KL1)
+  ELSE
+    PCLC = PNEB(JLON, KL1)
+  END IF
+  
+  ! compute cloud cover using actual overlap hypothesis
+  DO JLEV=KL1 + 1,KL2
+    
+    IF (YDML_PHY_MF%YRPHY%LRNUMX .and. YDML_PHY_MF%YRPHY%LACPANMX) THEN
+      
+      ! nearly maximum-random overlap
+      ZOVLP = MIN(1.0_JPRB - PNEB(JLON, JLEV), 1.0_JPRB - PWMXOV*PNEB(JLON, JLEV - 1)) / (1.0_JPRB - PWMXOV*PNEB(JLON, JLEV - 1))
+      
+    ELSE IF (YDML_PHY_MF%YRPHY%LRNUMX .and. YDML_PHY_MF%YRPHY%LRNUEXP) THEN
+      
+      ! exponential-random overlap
+      ZCLOV = EXP((PAPRSF(JLON, JLEV - 1) - PAPRSF(JLON, JLEV)) / (PDECRDRED*PDECRD))
+      ZOVLP = (1._JPRB - ZCLOV)*PNEB(JLON, JLEV)*PNEB(JLON, JLEV - 1) + ZCLOV*MIN(PNEB(JLON, JLEV), PNEB(JLON, JLEV - 1))
+      
+    ELSE IF (YDML_PHY_MF%YRPHY%LRNUMX) THEN
+      
+      ! maximum-random overlap
+      ZOVLP = MIN(PNEB(JLON, JLEV), PNEB(JLON, JLEV - 1))
+      
+    ELSE
+      
+      ! random overlap
+      ZOVLP = PNEB(JLON, JLEV)*PNEB(JLON, JLEV - 1)
+      
+    END IF
+    
+    ! update cloud cover
+    IF (YDML_PHY_MF%YRPHY%LRNUMX .and. YDML_PHY_MF%YRPHY%LACPANMX) THEN
+      PCLC = PCLC*ZOVLP
+    ELSE
+      PCLC = PCLC + (PNEB(JLON, JLEV) - ZOVLP)*(1._JPRB - PCLC) / (1._JPRB - PNEB(JLON, JLEV - 1))
+    END IF
+    
+  END DO
+  
+  ! convert complement of cloud cover to cloud cover
+  IF (YDML_PHY_MF%YRPHY%LRNUMX .and. YDML_PHY_MF%YRPHY%LACPANMX) THEN
+    PCLC = 1._JPRB - PCLC
+  END IF
+  
+  
+END SUBROUTINE ACNPART_CLOUD_COVER_OPENACC

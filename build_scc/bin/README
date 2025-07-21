@@ -1,0 +1,2 @@
+To run the transformation, go in your pack where you want to apply the transformation, and run build_scc/bin/openacc.sh and build_scc/bin/cpg_dyn_slg.sh.
+get_openacc.sh and get_cpg_dyn_slg.sh can be used to create a new build_scc/src folder if changes occured in the source code.

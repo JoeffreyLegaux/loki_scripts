@@ -1,0 +1,2 @@
+loki @ git+https://github.com/ecmwf-ifs/loki.git
+termcolor

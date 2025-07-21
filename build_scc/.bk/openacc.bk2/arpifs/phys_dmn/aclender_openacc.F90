@@ -1,0 +1,1398 @@
+SUBROUTINE ACLENDER_OPENACC (YDCST, YDPHY, YDPHY0, KIDIA, KFDIA, KLON, KTDIAN, KLEV, PAPHI, PAPHIF, PAPRS, PAPRSF, PT, PQV,  &
+& PQICE, PQLI, PNLAB, PNLABCVP, PLSCPE, PU, PV, PECT, PGZ0, PUSLE, PLEND, PPHI3, YDSTACK)
+  !-----------------------------------------------------------------------
+  ! - INPUT  2D .
+  ! - INPUT  1D .
+  ! - OUTPUT 2D .
+  
+  !**** *ACLENDER - CALCUL DES LONGUEURS DE MELANGE de Lenderink
+  
+  !     Sujet.
+  !     ------
+  
+  !**   Interface.
+  !     ----------
+  !        *CALL* *ACLENDER*
+  
+  !-----------------------------------------------------------------------
+  ! WARNING: THE ENGLISH VERSION OF VARIABLES' NAMES IS TO BE READ IN THE
+  !          "APLPAR" CODE, EXCEPT FOR KTDIAN.
+  !-----------------------------------------------------------------------
+  
+  ! -   ARGUMENTS D'ENTREE.
+  !     -------------------
+  
+  ! - NOM DES PARAMETRES DE DIMENSIONNEMENT DE LA PHYSIQUE.
+  
+  ! KIDIA      : INDICE DE DEPART DES BOUCLES VECTORISEES SUR L'HORIZONT.
+  ! KFDIA      : INDICE DE FIN DES BOUCLES VECTORISEES SUR L'HORIZONTALE.
+  ! KLON       : DIMENSION HORIZONTALE DES TABLEAUX.
+  ! KTDIAN     : INDICE DE DEPART DES BOUCLES VERTICALES (1 EN GENERAL)
+  !              POUR LES CALCULS DE TURBULENCE + NEBULOSITE.
+  ! KLEV       : DIMENSION VERTICALE DES TABLEAUX "FULL LEVEL".
+  
+  ! - NOM DES VARIABLES DE LA PHYSIQUE (PAR ORDRE ALPHABETIQUE DANS CHAQUE
+  !   CATEGORIE).
+  
+  ! - 2D (0:KLEV) .
+  
+  ! PAPHI      : GEOPOTENTIEL AUX DEMI-NIVEAUX.
+  ! PAPRS      : PRESSION AUX DEMI-NIVEAUX.
+  
+  ! - 2D (1:KLEV) .
+  
+  ! PAPHIF     : GEOPOTENTIEL AUX NIVEAUX DES COUCHES.
+  ! PAPRSF     : PRESSION AUX NIVEAUX DES COUCHES.
+  ! PT         : TEMPERATURE (APRES AJUSTEMENT CONVECTIF).
+  ! PECT       : ENERGIE CINETIQUE TURBULENTE.
+  ! PQV        : HUMIDITE SPECIFIQUE DE LA VAPEUR D'EAU.
+  ! PQICE      : HUMIDITE SPECIFIQUE SOLIDE.
+  ! PQLI       : HUMIDITE SPECIFIQUE LIQUIDE.
+  ! PNLAB      : Si 1 Presence d'un nuage Shallow
+  ! PNLABCVP   : Si 1 Presence d'un nuage Deep
+  
+  ! - 1D (DIAGNOSTIQUE) .
+  
+  ! PGZ0       : G FOIS LA LONGUEUR DE RUGOSITE COURANTE.
+  
+  !-----------------------------------------------------------------------
+  
+  ! -   ARGUMENTS DE SORTIE.
+  !     --------------------
+  
+  ! - NOM DES VARIABLES DE LA PHYSIQUE (PAR ORDRE ALPHABETIQUE DANS CHAQUE
+  !   CATEGORIE).
+  
+  ! - 2D (1:KLEV) .
+  
+  ! PUSLE      : INVERSE DE LA LONGUEUR DE DISSIPATION MULTIPLIEE PAR G
+  ! PLMECT     : UNE LONGUEUR DE MELANGE (FOIS G) POUR ACNEBR
+  ! PPHI3      : LA FONCTION DE REDESLPERGER POUR K_T
+  
+  !-----------------------------------------------------------------------
+  
+  ! -   ARGUMENTS IMPLICITES.
+  !     ---------------------
+  
+  ! COMMON/YOMCST /
+  ! COMMON/YOMPHY0/
+  
+  !-----------------------------------------------------------------------
+  
+  !     Externes.
+  !     ---------
+  
+  !     Methode.
+  !     --------
+  
+  !     Auteur.
+  !     -------
+  !      2007-12-25, Y. Bouteloup.
+  !              - - - - - - - - - - - - - - - - - - - - - - - - - - -
+  !              - - - - - - - - - - - - - - - - - - - - - - - - - - -
+  
+  !     Modifications.
+  !     --------------
+  !     R. El Khatib 22-Jun-2022 A contribution to simplify phasing after the refactoring of YOMCLI/YOMCST/YOETHF.
+  !-----------------------------------------------------------------------
+  
+!$acc routine( ACLENDER_OPENACC ) seq
+  
+  USE PARKIND1, ONLY: JPIM, JPRB
+  USE YOMHOOK, ONLY: LHOOK, DR_HOOK, JPHOOK
+  
+  USE YOMCST, ONLY: TCST
+  
+  USE YOMPHY, ONLY: TPHY
+  USE YOMPHY0, ONLY: TPHY0
+  
+  
+  
+  USE STACK_MOD
+#include "stack.h"
+  
+  IMPLICIT NONE
+  
+  TYPE(TCST), INTENT(IN) :: YDCST
+  TYPE(TPHY), INTENT(IN) :: YDPHY
+  TYPE(TPHY0), INTENT(IN) :: YDPHY0
+  INTEGER(KIND=JPIM), INTENT(IN) :: KLON
+  INTEGER(KIND=JPIM), INTENT(IN) :: KLEV
+  INTEGER(KIND=JPIM), INTENT(IN) :: KIDIA
+  INTEGER(KIND=JPIM), INTENT(IN) :: KFDIA
+  INTEGER(KIND=JPIM), INTENT(IN) :: KTDIAN
+  REAL(KIND=JPRB), INTENT(IN) :: PNLAB(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PNLABCVP(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PAPHI(KLON, 0:KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PAPHIF(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PAPRS(KLON, 0:KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PAPRSF(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PT(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PQV(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PQICE(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PQLI(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PLSCPE(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PU(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PV(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PECT(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PGZ0(KLON)
+  
+  
+  REAL(KIND=JPRB), INTENT(OUT) :: PLEND(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(OUT) :: PUSLE(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(OUT) :: PPHI3(KLON, KLEV)
+  ! Tableaux pour les sorties sur listing (1D seulement)
+  
+  INTEGER(KIND=JPIM) :: JLEV
+  INTEGER(KIND=JPIM) :: JLON
+  
+  
+  REAL(KIND=JPRB) :: ZPREF
+  REAL(KIND=JPRB) :: ZDTHETA
+  REAL(KIND=JPRB) :: ZQC
+  REAL(KIND=JPRB) :: ZCIS
+  REAL(KIND=JPRB) :: ZDPHI
+  REAL(KIND=JPRB) :: ZLINF
+  REAL(KIND=JPRB) :: ZC1
+  REAL(KIND=JPRB) :: ZPHIH
+  REAL(KIND=JPRB) :: ZGLKARMN
+  REAL(KIND=JPRB) :: ZB
+  REAL(KIND=JPRB) :: ZC0
+  REAL(KIND=JPRB) :: ZCD
+  REAL(KIND=JPRB) :: ZCN
+  REAL(KIND=JPRB) :: ZALPHAN
+  REAL(KIND=JPRB) :: ZALPHACM
+  REAL(KIND=JPRB) :: ZALPHACH
+  REAL(KIND=JPRB) :: ZALPHARH
+  REAL(KIND=JPRB) :: ZALPHARM
+  REAL(KIND=JPRB) :: ZPIS2
+  REAL(KIND=JPRB) :: ZSEUILM
+  REAL(KIND=JPRB) :: ZSEUILH
+  REAL(KIND=JPRB) :: ZARIM
+  REAL(KIND=JPRB) :: ZARIH
+  REAL(KIND=JPRB) :: ZCM_CLEAR
+  REAL(KIND=JPRB) :: ZCM_CLOUD
+  REAL(KIND=JPRB) :: ZCH
+  REAL(KIND=JPRB) :: ZC3M_CLEAR
+  REAL(KIND=JPRB) :: ZC3M_CLOUD
+  REAL(KIND=JPRB) :: ZC3H_CLEAR
+  REAL(KIND=JPRB) :: ZC3H_CLOUD
+  temp (REAL (KIND=JPRB), ZTHETAVL, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZRI, (KLON, 0:KLEV))
+  temp (REAL (KIND=JPRB), ZDTH, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZDTH2, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZDCIS, (KLON, KLEV))
+  
+  temp (REAL (KIND=JPRB), ZFM_CLEAR, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZFM_CLOUD, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZFH_CLEAR, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZFH_CLOUD, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLUPM_CLEAR, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLUPM_CLOUD, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLUPH_CLEAR, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLUPH_CLOUD, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLDNM_CLEAR, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLDNM_CLOUD, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLDNH_CLEAR, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLDNH_CLOUD, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLSM_CLEAR, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLSM_CLOUD, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLSH_CLEAR, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLSH_CLOUD, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLINTM_CLEAR, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLINTM_CLOUD, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLINTH_CLEAR, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLINTH_CLOUD, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLENDM_CLEAR, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLENDH_CLEAR, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLENDM_CLOUD, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLENDH_CLOUD, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLENDM, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLENDH, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZTHETA, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLENDMM, (KLON, KLEV))
+  
+  temp (REAL (KIND=JPRB), ZNN_CLEAR, (KLON, 0:KLEV))
+  temp (REAL (KIND=JPRB), ZNN_CLOUD, (KLON, 0:KLEV))
+  temp (REAL (KIND=JPRB), ZRIF, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLMIN, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZGLMINF, (KLON, KLEV))
+  
+  
+  !  Tableaux et variables pour le calcul de delta T humide
+  REAL(KIND=JPRB) :: ZTJ
+  REAL(KIND=JPRB) :: ZTDERI
+  REAL(KIND=JPRB) :: ZLOG
+  REAL(KIND=JPRB) :: ZQVSH1
+  REAL(KIND=JPRB) :: ZDH1
+  REAL(KIND=JPRB) :: ZQVSH2
+  REAL(KIND=JPRB) :: ZDH2
+  REAL(KIND=JPRB) :: ZNEIGE
+  REAL(KIND=JPRB) :: ZDQL1
+  REAL(KIND=JPRB) :: ZDQL2
+  
+  temp (REAL (KIND=JPRB), ZQV, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZQL, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZRH, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZCPH, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZLH, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZQVS, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZQSEUIL, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZTHD, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZTHU, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZTHDC, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZTHUC, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZRI2, (KLON, 0:KLEV))
+  temp (REAL (KIND=JPRB), ZRIF2, (KLON, KLEV))
+  
+  REAL(KIND=JPRB) :: ZGZBOT
+  REAL(KIND=JPRB) :: ZGZTOP
+  REAL(KIND=JPRB) :: ZGZBOTCVP
+  REAL(KIND=JPRB) :: ZGZTOPCVP
+  
+  REAL(KIND=JPRB) :: ZTF1
+  REAL(KIND=JPRB) :: ZQCF1
+  REAL(KIND=JPRB) :: ZLSCPEF1
+  REAL(KIND=JPRB) :: ZTLF1
+  REAL(KIND=JPRB) :: ZH1
+  REAL(KIND=JPRB) :: ZEW1
+  REAL(KIND=JPRB) :: ZQSATF1
+  REAL(KIND=JPRB) :: ZDLEWF1
+  REAL(KIND=JPRB) :: ZQSLTLF1
+  REAL(KIND=JPRB) :: ZTHETAL1
+  REAL(KIND=JPRB) :: ZDELTQF1
+  REAL(KIND=JPRB) :: ZQWF1
+  REAL(KIND=JPRB) :: ZTF2
+  REAL(KIND=JPRB) :: ZQCF2
+  REAL(KIND=JPRB) :: ZLSCPEF2
+  REAL(KIND=JPRB) :: ZTLF2
+  REAL(KIND=JPRB) :: ZH2
+  REAL(KIND=JPRB) :: ZEW2
+  REAL(KIND=JPRB) :: ZQSATF2
+  REAL(KIND=JPRB) :: ZDLEWF2
+  REAL(KIND=JPRB) :: ZQSLTLF2
+  REAL(KIND=JPRB) :: ZTHETAL2
+  REAL(KIND=JPRB) :: ZDELTQF2
+  REAL(KIND=JPRB) :: ZQWF2
+  REAL(KIND=JPRB) :: ZTH
+  REAL(KIND=JPRB) :: ZQSLTLH
+  REAL(KIND=JPRB) :: ZLSCPEH
+  REAL(KIND=JPRB) :: ZTHETAH
+  REAL(KIND=JPRB) :: ZBB
+  REAL(KIND=JPRB) :: ZDTHETAL
+  REAL(KIND=JPRB) :: ZEPSIG
+  REAL(KIND=JPRB) :: ZEPDELT
+  REAL(KIND=JPRB) :: ZEPSQ
+  REAL(KIND=JPRB) :: ZINC
+  REAL(KIND=JPRB) :: ZDQW
+  REAL(KIND=JPRB) :: ZIGMAS
+  REAL(KIND=JPRB) :: ZQ11
+  temp (REAL (KIND=JPRB), ZIGMAS_CLOUD, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZIGMAS_CLEAR, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZAA, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZDELTQH, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZNEB, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZNEBI, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZQVL, (KLON, KLEV))
+  REAL(KIND=JPRB) :: ZRESUL
+  REAL(KIND=JPRB) :: ZSURSAT
+  REAL(KIND=JPRB) :: ZEPNEBS
+  REAL(KIND=JPRB) :: ZZN1D
+  REAL(KIND=JPRB) :: ZRIH
+  REAL(KIND=JPRB) :: ZOFFSET
+  REAL(KIND=JPRB) :: ZDQV
+  REAL(KIND=JPRB) :: ZTC
+  REAL(KIND=JPRB) :: ZGZLCVPUP
+  REAL(KIND=JPRB) :: ZGZLCVPDN
+  ! Tableaux et variables pour le calcul de PHI3
+  
+  temp (REAL (KIND=JPRB), ZG2LD2, (KLON, KLEV))
+  REAL(KIND=JPRB) :: ZPHI3MAX
+  REAL(KIND=JPRB) :: ZPHI3I
+  
+  
+  INTEGER(KIND=JPIM) :: INQ1
+  INTEGER(KIND=JPIM) :: JN
+  
+  REAL(KIND=JPHOOK) :: ZHOOK_HANDLE
+  
+  !     FUNCTIONS THERMODYNAMIQUES DE BASE
+#include "fcttrm.func.h"
+  TYPE(STACK), INTENT(IN) :: YDSTACK
+  TYPE(STACK) :: YLSTACK
+  YLSTACK = YDSTACK
+  IF (KIND (ZTHETAVL) == 8) THEN
+    alloc8 (ZTHETAVL)
+  ELSE
+    IF (KIND (ZTHETAVL) == 4) THEN
+      alloc4 (ZTHETAVL)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZRI) == 8) THEN
+    alloc8 (ZRI)
+  ELSE
+    IF (KIND (ZRI) == 4) THEN
+      alloc4 (ZRI)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZDTH) == 8) THEN
+    alloc8 (ZDTH)
+  ELSE
+    IF (KIND (ZDTH) == 4) THEN
+      alloc4 (ZDTH)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZDTH2) == 8) THEN
+    alloc8 (ZDTH2)
+  ELSE
+    IF (KIND (ZDTH2) == 4) THEN
+      alloc4 (ZDTH2)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZDCIS) == 8) THEN
+    alloc8 (ZDCIS)
+  ELSE
+    IF (KIND (ZDCIS) == 4) THEN
+      alloc4 (ZDCIS)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZFM_CLEAR) == 8) THEN
+    alloc8 (ZFM_CLEAR)
+  ELSE
+    IF (KIND (ZFM_CLEAR) == 4) THEN
+      alloc4 (ZFM_CLEAR)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZFM_CLOUD) == 8) THEN
+    alloc8 (ZFM_CLOUD)
+  ELSE
+    IF (KIND (ZFM_CLOUD) == 4) THEN
+      alloc4 (ZFM_CLOUD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZFH_CLEAR) == 8) THEN
+    alloc8 (ZFH_CLEAR)
+  ELSE
+    IF (KIND (ZFH_CLEAR) == 4) THEN
+      alloc4 (ZFH_CLEAR)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZFH_CLOUD) == 8) THEN
+    alloc8 (ZFH_CLOUD)
+  ELSE
+    IF (KIND (ZFH_CLOUD) == 4) THEN
+      alloc4 (ZFH_CLOUD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLUPM_CLEAR) == 8) THEN
+    alloc8 (ZLUPM_CLEAR)
+  ELSE
+    IF (KIND (ZLUPM_CLEAR) == 4) THEN
+      alloc4 (ZLUPM_CLEAR)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLUPM_CLOUD) == 8) THEN
+    alloc8 (ZLUPM_CLOUD)
+  ELSE
+    IF (KIND (ZLUPM_CLOUD) == 4) THEN
+      alloc4 (ZLUPM_CLOUD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLUPH_CLEAR) == 8) THEN
+    alloc8 (ZLUPH_CLEAR)
+  ELSE
+    IF (KIND (ZLUPH_CLEAR) == 4) THEN
+      alloc4 (ZLUPH_CLEAR)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLUPH_CLOUD) == 8) THEN
+    alloc8 (ZLUPH_CLOUD)
+  ELSE
+    IF (KIND (ZLUPH_CLOUD) == 4) THEN
+      alloc4 (ZLUPH_CLOUD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLDNM_CLEAR) == 8) THEN
+    alloc8 (ZLDNM_CLEAR)
+  ELSE
+    IF (KIND (ZLDNM_CLEAR) == 4) THEN
+      alloc4 (ZLDNM_CLEAR)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLDNM_CLOUD) == 8) THEN
+    alloc8 (ZLDNM_CLOUD)
+  ELSE
+    IF (KIND (ZLDNM_CLOUD) == 4) THEN
+      alloc4 (ZLDNM_CLOUD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLDNH_CLEAR) == 8) THEN
+    alloc8 (ZLDNH_CLEAR)
+  ELSE
+    IF (KIND (ZLDNH_CLEAR) == 4) THEN
+      alloc4 (ZLDNH_CLEAR)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLDNH_CLOUD) == 8) THEN
+    alloc8 (ZLDNH_CLOUD)
+  ELSE
+    IF (KIND (ZLDNH_CLOUD) == 4) THEN
+      alloc4 (ZLDNH_CLOUD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLSM_CLEAR) == 8) THEN
+    alloc8 (ZLSM_CLEAR)
+  ELSE
+    IF (KIND (ZLSM_CLEAR) == 4) THEN
+      alloc4 (ZLSM_CLEAR)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLSM_CLOUD) == 8) THEN
+    alloc8 (ZLSM_CLOUD)
+  ELSE
+    IF (KIND (ZLSM_CLOUD) == 4) THEN
+      alloc4 (ZLSM_CLOUD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLSH_CLEAR) == 8) THEN
+    alloc8 (ZLSH_CLEAR)
+  ELSE
+    IF (KIND (ZLSH_CLEAR) == 4) THEN
+      alloc4 (ZLSH_CLEAR)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLSH_CLOUD) == 8) THEN
+    alloc8 (ZLSH_CLOUD)
+  ELSE
+    IF (KIND (ZLSH_CLOUD) == 4) THEN
+      alloc4 (ZLSH_CLOUD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLINTM_CLEAR) == 8) THEN
+    alloc8 (ZLINTM_CLEAR)
+  ELSE
+    IF (KIND (ZLINTM_CLEAR) == 4) THEN
+      alloc4 (ZLINTM_CLEAR)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLINTM_CLOUD) == 8) THEN
+    alloc8 (ZLINTM_CLOUD)
+  ELSE
+    IF (KIND (ZLINTM_CLOUD) == 4) THEN
+      alloc4 (ZLINTM_CLOUD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLINTH_CLEAR) == 8) THEN
+    alloc8 (ZLINTH_CLEAR)
+  ELSE
+    IF (KIND (ZLINTH_CLEAR) == 4) THEN
+      alloc4 (ZLINTH_CLEAR)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLINTH_CLOUD) == 8) THEN
+    alloc8 (ZLINTH_CLOUD)
+  ELSE
+    IF (KIND (ZLINTH_CLOUD) == 4) THEN
+      alloc4 (ZLINTH_CLOUD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLENDM_CLEAR) == 8) THEN
+    alloc8 (ZLENDM_CLEAR)
+  ELSE
+    IF (KIND (ZLENDM_CLEAR) == 4) THEN
+      alloc4 (ZLENDM_CLEAR)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLENDH_CLEAR) == 8) THEN
+    alloc8 (ZLENDH_CLEAR)
+  ELSE
+    IF (KIND (ZLENDH_CLEAR) == 4) THEN
+      alloc4 (ZLENDH_CLEAR)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLENDM_CLOUD) == 8) THEN
+    alloc8 (ZLENDM_CLOUD)
+  ELSE
+    IF (KIND (ZLENDM_CLOUD) == 4) THEN
+      alloc4 (ZLENDM_CLOUD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLENDH_CLOUD) == 8) THEN
+    alloc8 (ZLENDH_CLOUD)
+  ELSE
+    IF (KIND (ZLENDH_CLOUD) == 4) THEN
+      alloc4 (ZLENDH_CLOUD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLENDM) == 8) THEN
+    alloc8 (ZLENDM)
+  ELSE
+    IF (KIND (ZLENDM) == 4) THEN
+      alloc4 (ZLENDM)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLENDH) == 8) THEN
+    alloc8 (ZLENDH)
+  ELSE
+    IF (KIND (ZLENDH) == 4) THEN
+      alloc4 (ZLENDH)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZTHETA) == 8) THEN
+    alloc8 (ZTHETA)
+  ELSE
+    IF (KIND (ZTHETA) == 4) THEN
+      alloc4 (ZTHETA)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLENDMM) == 8) THEN
+    alloc8 (ZLENDMM)
+  ELSE
+    IF (KIND (ZLENDMM) == 4) THEN
+      alloc4 (ZLENDMM)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZNN_CLEAR) == 8) THEN
+    alloc8 (ZNN_CLEAR)
+  ELSE
+    IF (KIND (ZNN_CLEAR) == 4) THEN
+      alloc4 (ZNN_CLEAR)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZNN_CLOUD) == 8) THEN
+    alloc8 (ZNN_CLOUD)
+  ELSE
+    IF (KIND (ZNN_CLOUD) == 4) THEN
+      alloc4 (ZNN_CLOUD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZRIF) == 8) THEN
+    alloc8 (ZRIF)
+  ELSE
+    IF (KIND (ZRIF) == 4) THEN
+      alloc4 (ZRIF)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLMIN) == 8) THEN
+    alloc8 (ZLMIN)
+  ELSE
+    IF (KIND (ZLMIN) == 4) THEN
+      alloc4 (ZLMIN)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZGLMINF) == 8) THEN
+    alloc8 (ZGLMINF)
+  ELSE
+    IF (KIND (ZGLMINF) == 4) THEN
+      alloc4 (ZGLMINF)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZQV) == 8) THEN
+    alloc8 (ZQV)
+  ELSE
+    IF (KIND (ZQV) == 4) THEN
+      alloc4 (ZQV)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZQL) == 8) THEN
+    alloc8 (ZQL)
+  ELSE
+    IF (KIND (ZQL) == 4) THEN
+      alloc4 (ZQL)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZRH) == 8) THEN
+    alloc8 (ZRH)
+  ELSE
+    IF (KIND (ZRH) == 4) THEN
+      alloc4 (ZRH)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZCPH) == 8) THEN
+    alloc8 (ZCPH)
+  ELSE
+    IF (KIND (ZCPH) == 4) THEN
+      alloc4 (ZCPH)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZLH) == 8) THEN
+    alloc8 (ZLH)
+  ELSE
+    IF (KIND (ZLH) == 4) THEN
+      alloc4 (ZLH)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZQVS) == 8) THEN
+    alloc8 (ZQVS)
+  ELSE
+    IF (KIND (ZQVS) == 4) THEN
+      alloc4 (ZQVS)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZQSEUIL) == 8) THEN
+    alloc8 (ZQSEUIL)
+  ELSE
+    IF (KIND (ZQSEUIL) == 4) THEN
+      alloc4 (ZQSEUIL)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZTHD) == 8) THEN
+    alloc8 (ZTHD)
+  ELSE
+    IF (KIND (ZTHD) == 4) THEN
+      alloc4 (ZTHD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZTHU) == 8) THEN
+    alloc8 (ZTHU)
+  ELSE
+    IF (KIND (ZTHU) == 4) THEN
+      alloc4 (ZTHU)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZTHDC) == 8) THEN
+    alloc8 (ZTHDC)
+  ELSE
+    IF (KIND (ZTHDC) == 4) THEN
+      alloc4 (ZTHDC)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZTHUC) == 8) THEN
+    alloc8 (ZTHUC)
+  ELSE
+    IF (KIND (ZTHUC) == 4) THEN
+      alloc4 (ZTHUC)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZRI2) == 8) THEN
+    alloc8 (ZRI2)
+  ELSE
+    IF (KIND (ZRI2) == 4) THEN
+      alloc4 (ZRI2)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZRIF2) == 8) THEN
+    alloc8 (ZRIF2)
+  ELSE
+    IF (KIND (ZRIF2) == 4) THEN
+      alloc4 (ZRIF2)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZIGMAS_CLOUD) == 8) THEN
+    alloc8 (ZIGMAS_CLOUD)
+  ELSE
+    IF (KIND (ZIGMAS_CLOUD) == 4) THEN
+      alloc4 (ZIGMAS_CLOUD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZIGMAS_CLEAR) == 8) THEN
+    alloc8 (ZIGMAS_CLEAR)
+  ELSE
+    IF (KIND (ZIGMAS_CLEAR) == 4) THEN
+      alloc4 (ZIGMAS_CLEAR)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZAA) == 8) THEN
+    alloc8 (ZAA)
+  ELSE
+    IF (KIND (ZAA) == 4) THEN
+      alloc4 (ZAA)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZDELTQH) == 8) THEN
+    alloc8 (ZDELTQH)
+  ELSE
+    IF (KIND (ZDELTQH) == 4) THEN
+      alloc4 (ZDELTQH)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZNEB) == 8) THEN
+    alloc8 (ZNEB)
+  ELSE
+    IF (KIND (ZNEB) == 4) THEN
+      alloc4 (ZNEB)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZNEBI) == 8) THEN
+    alloc8 (ZNEBI)
+  ELSE
+    IF (KIND (ZNEBI) == 4) THEN
+      alloc4 (ZNEBI)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZQVL) == 8) THEN
+    alloc8 (ZQVL)
+  ELSE
+    IF (KIND (ZQVL) == 4) THEN
+      alloc4 (ZQVL)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZG2LD2) == 8) THEN
+    alloc8 (ZG2LD2)
+  ELSE
+    IF (KIND (ZG2LD2) == 4) THEN
+      alloc4 (ZG2LD2)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  JLON = KIDIA
+  
+  !#include "abor1.intfb.h"
+  
+  !*
+  !     ------------------------------------------------------------------
+  
+  !     CHECK RELIABILITY OF INPUT ARGUMENTS.
+  
+  
+  !*
+  !     ------------------------------------------------------------------
+  !     0 - CONSTANTES UTILES et initialisations
+  !     ------------------------------------------------------------------
+  
+  ZLINF = 75.0_JPRB
+  ZB = 4._JPRB
+  !ZB  = 3._JPRB
+  ZC0 = 3.75_JPRB
+  ZCD = 1._JPRB / ZC0 / ZC0
+  ZCN = SQRT(SQRT(ZCD))
+  !ZCN = 2.0_JPRB*SQRT(SQRT(ZCD))  !<== Pour essai !!!
+  ZPIS2 = YDCST%RPI / 2.0_JPRB
+  ZALPHAN = ZCN*YDPHY0%VKARMN
+  !ZALPHAN = 0.0_JPRB
+  ZOFFSET = 0.2_JPRB    ! <== Offset de la fonction Fm
+  ZALPHACH = 3._JPRB*ZCN*YDPHY0%VKARMN
+  ZALPHACM = 3._JPRB*ZCN*YDPHY0%VKARMN
+  
+  !ZALPHACH = 1.0_JPRB
+  !ZALPHACM = 1.0_JPRB
+  
+  ZALPHARH = ZALPHAN*ZPIS2*ZB / (ZALPHACH - ZALPHAN)
+  ZALPHARM = ZALPHAN*ZPIS2*ZB / (ZALPHACM - ZALPHAN)
+  
+  
+  ZCH = 0.2_JPRB
+  !ZCH = 0.1_JPRB   !<== Pour test (voir Lenderink et Holtslag 2004)
+  
+  ZRI(JLON, :) = 0.0_JPRB
+  ZRI2(JLON, :) = 0.0_JPRB
+  ZFM_CLEAR(JLON, :) = 0.0_JPRB
+  ZFM_CLOUD(JLON, :) = 0.0_JPRB
+  ZFH_CLEAR(JLON, :) = 0.0_JPRB
+  ZFH_CLOUD(JLON, :) = 0.0_JPRB
+  ZDTH(JLON, :) = 0.0_JPRB
+  ZDTH2(JLON, :) = 0.0_JPRB
+  ZDCIS(JLON, :) = 0.0_JPRB
+  ZLSM_CLEAR(JLON, :) = 0.0_JPRB
+  ZLSM_CLOUD(JLON, :) = 0.0_JPRB
+  ZLSH_CLEAR(JLON, :) = 0.0_JPRB
+  ZLSH_CLOUD(JLON, :) = 0.0_JPRB
+  ZNN_CLEAR(JLON, :) = 0.0_JPRB
+  ZNN_CLOUD(JLON, :) = 0.0_JPRB
+  ZIGMAS_CLOUD(JLON, :) = 0.0_JPRB
+  ZIGMAS_CLEAR(JLON, :) = 0.0_JPRB
+  ZDELTQH(JLON, :) = 0.0_JPRB
+  
+  !*
+  !     ------------------------------------------------------------------
+  !     1 - CALCULS DU NOMBRE DE RICHARDSON, de la fonction Fm et de N
+  !     ------------------------------------------------------------------
+  
+  ! En fait on a besoin des longueurs lup et ldown sur les "half" level, comme elles sont calculées
+  ! par intégration de la fonction Fm(Ri), celle-ci et donc Ri doivent être calculés sur les "full"
+  ! De manière naturelle Ri est calculé sur les "half", car il utilise un delta theta et theta est connu sur les "full"
+  
+  ! La technique utilisée ici est de calculer Ri sur les "half" puis de l'interpoller
+  ! linéairement sur les "full"
+  
+  ! - - - - - - - - - - - - - - - - - -
+  ! CALCULS Thermodynamique utiles pour la suite
+  ! - - - - - - - - - - - - - - - - - -
+  ZNEIGE = 0.0_JPRB    ! <== on ne tient pas compte de la glace
+  DO JLEV=1,KLEV
+    ZQV(JLON, JLEV) = MAX(0.0_JPRB, PQV(JLON, JLEV))
+    ZQL(JLON, JLEV) = MAX(0.0_JPRB, PQLI(JLON, JLEV))
+    ZQVL(JLON, JLEV) = ZQV(JLON, JLEV) + ZQL(JLON, JLEV)
+    ZQSEUIL(JLON, JLEV) = MAX(0.0_JPRB, SIGN(1.0_JPRB, ZQL(JLON, JLEV) - 1.0E-6_JPRB))
+    
+    ! Calcul de R, Cp et L humide
+    ZRH(JLON, JLEV) = YDCST%RD + (YDCST%RD - YDCST%RV)*ZQV(JLON, JLEV)
+    ZCPH(JLON, JLEV) =  &
+    & YDCST%RCPD*(1.0_JPRB - ZQV(JLON, JLEV) - ZQL(JLON, JLEV)) + YDCST%RCPV*ZQV(JLON, JLEV) + YDCST%RCW*ZQL(JLON, JLEV)
+    ZLH(JLON, JLEV) = YDCST%RLVTT - (PT(JLON, JLEV) - YDCST%RTT)*(YDCST%RCW - YDCST%RCPV)
+    
+    ZTC = PT(JLON, JLEV) - PLSCPE(JLON, JLEV)*ZQL(JLON, JLEV)
+    
+    !    ZQVS(JLON,JLEV) = FOQS (FOEW (PT(JLON,JLEV),ZNEIGE )/PAPRSF(JLON,JLEV) )
+    ZQVS(JLON, JLEV) = FOQS(FOEW(ZTC, ZNEIGE) / PAPRSF(JLON, JLEV))
+  END DO
+  
+  
+  ! - - - - - - - - - - - - - - - - - -
+  ! CALCULS DE THETAVL sur les "full"
+  ! - - - - - - - - - - - - - - - - - -
+  
+  DO JLEV=1,KLEV
+    ZPREF = PAPRSF(JLON, JLEV)
+    ZTHETA(JLON, JLEV) = PT(JLON, JLEV)*(YDCST%RATM / ZPREF)**YDCST%RKAPPA
+    ZQC = ZQL(JLON, JLEV) + PQICE(JLON, JLEV)
+    ZTHETAVL(JLON, JLEV) = ZTHETA(JLON, JLEV)*(1.0_JPRB + YDCST%RETV*ZQV(JLON, JLEV) - ZQC)
+  END DO
+  
+  ! - - - - - - - - - - -
+  ! CALCULS DE Ri, de N2 et de (gLd)**2 sur les "half" dans le cas clair
+  ! - - - - - - - - - - -
+  
+  
+  DO JLEV=1,KLEV - 1
+    ZDTHETA = (ZTHETAVL(JLON, JLEV + 1) - ZTHETAVL(JLON, JLEV))
+    ZDTH(JLON, JLEV) = ZDTHETA
+    ZCIS = MAX(1.0E-10_JPRB, (PU(JLON, JLEV + 1) - PU(JLON, JLEV))**2 + (PV(JLON, JLEV + 1) - PV(JLON, JLEV))**2)
+    ZDCIS(JLON, JLEV) = ZCIS
+    ZDPHI = PAPHIF(JLON, JLEV + 1) - PAPHIF(JLON, JLEV)
+    !    ZRI(JLON,JLEV) = ZDPHI*ZDTHETA/ZCIS/ZTHETAVL(JLON,JLEV)
+    !    ZNN_CLEAR(JLON,JLEV) = MAX(1.0E-10_JPRB,ZDTHETA/ZDPHI/ZTHETAVL(JLON,JLEV))
+    
+    !  On profite de cette boucle pour calculer le terme (gLd)**2 nécessaire au calcul de PHI3
+    
+    ZTHETAH = 0.5_JPRB*(ZTHETAVL(JLON, JLEV + 1) + ZTHETAVL(JLON, JLEV))
+    ZG2LD2(JLON, JLEV) = PECT(JLON, JLEV)*ZTHETAH*ZDPHI / ZDTHETA
+    
+    
+    ! Calcul du terme correctif de Ri selon Geleyn 1986
+    
+    IF (YDPHY%NLEND == 2) THEN
+      ZLSCPEH = 0.5_JPRB*(PLSCPE(JLON, JLEV) + PLSCPE(JLON, JLEV))
+      ZDQV = ZQVL(JLON, JLEV + 1) - ZQVS(JLON, JLEV + 1) - (ZQVL(JLON, JLEV) - ZQVS(JLON, JLEV))
+    ELSE
+      ZDQV = 0.0_JPRB
+    END IF
+    
+    ! Calcul de Ri et N2    (Nouveau calcul utilisant le theta du half level)
+    ZRI(JLON, JLEV) = ZDPHI*(ZDTHETA + ZDQV) / ZCIS / ZTHETAH
+    ZNN_CLEAR(JLON, JLEV) = MAX(1.0E-10_JPRB, ZDTHETA / ZDPHI / ZTHETAH)
+    
+  END DO
+  
+  !  Midification de Ri selon Geleyn 1986 !
+  
+  
+  !  Nouveau calcul de Ri et N2 prenant en compte la condensation
+  
+  !  On commence par calculé la température sur le half intermèdiaire des particules venant des full du
+  !  dessus et du dessous par transformtation adiabatique (le delta calculé doit être très proche du calcul précédent !)
+  
+  !  Calcul de la température finale d'une particule venant du full jlev
+  !  arrivant sur le half jlev (descente !)
+  
+  
+  DO JLEV=1,KLEV - 1
+    ! 1 adiabatique sèche
+    ZTJ = PT(JLON, JLEV)*(PAPRS(JLON, JLEV) / PAPRSF(JLON, JLEV))**(ZRH(JLON, JLEV) / ZCPH(JLON, JLEV))
+    ZTDERI = 0.5_JPRB*(PT(JLON, JLEV) + ZTJ)
+    ! Correction prenant en compte le changement de phase
+    ZLOG = LOG(PAPRS(JLON, JLEV) / PAPRSF(JLON, JLEV))
+    ZQVSH1 = FOQS(FOEW(ZTJ, ZNEIGE) / PAPRS(JLON, JLEV))      !<== humidité saturante du lieu d'arrivée
+    ZDQL1 = ZQSEUIL(JLON, JLEV)*(ZQVS(JLON, JLEV) - ZQVSH1)
+    ZDH1 = ZCPH(JLON, JLEV)*(ZTJ - PT(JLON, JLEV)) + ZLH(JLON, JLEV)*ZDQL1 - ZRH(JLON, JLEV)*ZTJ*ZLOG
+    
+    ZQVSH2 = FOQS(FOEW(ZTDERI, ZNEIGE) / PAPRS(JLON, JLEV))      !<== humidité saturante du lieu d'arrivée
+    ZDQL2 = ZQSEUIL(JLON, JLEV)*(ZQVS(JLON, JLEV) - ZQVSH2)
+    ZDH2 = ZCPH(JLON, JLEV)*(ZTDERI - PT(JLON, JLEV)) + ZLH(JLON, JLEV)*ZDQL2 - ZRH(JLON, JLEV)*ZTDERI*ZLOG
+    
+    ZTHDC(JLON, JLEV) = ZTJ + ZDH1*(ZTDERI - ZTJ) / (ZDH1 - ZDH2)
+    ZTHD(JLON, JLEV) = ZTJ
+  END DO
+  
+  !  Calcul de la température finale d'une particule venant du full jlev+1
+  !  arrivant sur le half jlev (montée !)
+  
+  DO JLEV=1,KLEV - 1
+    ! 1 adiabatique séche
+    ZTJ = PT(JLON, JLEV + 1)*(PAPRS(JLON, JLEV) / PAPRSF(JLON, JLEV + 1))**(ZRH(JLON, JLEV + 1) / ZCPH(JLON, JLEV + 1))
+    ZTDERI = 0.5_JPRB*(PT(JLON, JLEV + 1) + ZTJ)
+    ! Correction prenant en compte le changement de phase
+    ZLOG = LOG(PAPRS(JLON, JLEV) / PAPRSF(JLON, JLEV + 1))
+    ZQVSH1 = FOQS(FOEW(ZTJ, ZNEIGE) / PAPRS(JLON, JLEV))      !<== humidité saturante du lieu d'arrivée
+    ZDQL1 = ZQSEUIL(JLON, JLEV + 1)*(ZQVS(JLON, JLEV + 1) - ZQVSH1)
+    ZDH1 = ZCPH(JLON, JLEV + 1)*(ZTJ - PT(JLON, JLEV + 1)) + ZLH(JLON, JLEV + 1)*ZDQL1 - ZRH(JLON, JLEV + 1)*ZTJ*ZLOG
+    
+    ZQVSH2 = FOQS(FOEW(ZTDERI, ZNEIGE) / PAPRS(JLON, JLEV))      !<== humidité saturante du lieu d'arrivée
+    ZDQL2 = ZQSEUIL(JLON, JLEV + 1)*(ZQVS(JLON, JLEV + 1) - ZQVSH2)
+    ZDH2 = ZCPH(JLON, JLEV + 1)*(ZTDERI - PT(JLON, JLEV + 1)) + ZLH(JLON, JLEV + 1)*ZDQL2 - ZRH(JLON, JLEV + 1)*ZTDERI*ZLOG
+    ZTHUC(JLON, JLEV) = ZTJ + ZDH1*(ZTDERI - ZTJ) / (ZDH1 - ZDH2)
+    ZTHU(JLON, JLEV) = ZTJ
+  END DO
+  
+  ZTHDC(JLON, KLEV) = ZTHDC(JLON, KLEV - 1)
+  ZTHD(JLON, KLEV) = ZTHD(JLON, KLEV - 1)
+  ZTHUC(JLON, KLEV) = ZTHUC(JLON, KLEV - 1)
+  ZTHU(JLON, KLEV) = ZTHU(JLON, KLEV - 1)
+  
+  DO JLEV=1,KLEV - 1
+    ZDTH2(JLON, JLEV) = ZTHUC(JLON, JLEV) - ZTHDC(JLON, JLEV)
+    ZCIS = MAX(1.0E-10_JPRB, (PU(JLON, JLEV + 1) - PU(JLON, JLEV))**2 + (PV(JLON, JLEV + 1) - PV(JLON, JLEV))**2)
+    ZTHETAH = 0.5_JPRB*(ZTHETAVL(JLON, JLEV + 1) + ZTHETAVL(JLON, JLEV))
+    ZDPHI = PAPHIF(JLON, JLEV + 1) - PAPHIF(JLON, JLEV)
+    ZRI2(JLON, JLEV) = ZDPHI*ZDTH2(JLON, JLEV) / ZCIS / ZTHETAH
+    ZNN_CLOUD(JLON, JLEV) = MAX(1.0E-10_JPRB, ZDTH2(JLON, JLEV) / ZDPHI / ZTHETAH)
+  END DO
+  
+  ZNN_CLEAR(JLON, KLEV) = ZNN_CLEAR(JLON, KLEV - 1)
+  ZNN_CLOUD(JLON, KLEV) = ZNN_CLOUD(JLON, KLEV - 1)
+  
+  ! - - - - - - - - - - -
+  ! Interpollation de Ri sur les "full"
+  ! - - - - - - - - - - -
+  
+  DO JLEV=1,KLEV
+    ZRIF(JLON, JLEV) = 0.5_JPRB*(ZRI(JLON, JLEV - 1) + ZRI(JLON, JLEV))
+    ZRIF2(JLON, JLEV) = 0.5_JPRB*(ZRI2(JLON, JLEV - 1) + ZRI2(JLON, JLEV))
+  END DO
+  
+  ! - - - - - - - - - - -
+  ! CALCULS DE Fm et Fh sur les "full"
+  ! - - - - - - - - - - -
+  
+  
+  ! Cas clair
+  DO JLEV=1,KLEV
+    ZSEUILM = MAX(0.0_JPRB, SIGN(1.0_JPRB, ZRIF(JLON, JLEV)))
+    ZSEUILH = MAX(0.0_JPRB, SIGN(1.0_JPRB, ZRIF(JLON, JLEV)))
+    ZARIM = ZALPHARM*ZRIF(JLON, JLEV)
+    ZARIH = ZALPHARH*ZRIF(JLON, JLEV)
+    ZFM_CLEAR(JLON, JLEV) = ZOFFSET + (ZALPHAN - (ZALPHACM - ZALPHAN)*(ZSEUILM*ZARIM + (1.0_JPRB - ZSEUILM)*ATAN(ZARIM)) / ZPIS2)
+    ZFH_CLEAR(JLON, JLEV) = ZOFFSET + (ZALPHAN - (ZALPHACH - ZALPHAN)*(ZSEUILH*ZARIH + (1.0_JPRB - ZSEUILH)*ATAN(ZARIH)) / ZPIS2)
+  END DO
+  ! Cas nuageux
+  DO JLEV=1,KLEV
+    ZSEUILM = MAX(0.0_JPRB, SIGN(1.0_JPRB, ZRIF2(JLON, JLEV)))
+    ZSEUILH = MAX(0.0_JPRB, SIGN(1.0_JPRB, ZRIF2(JLON, JLEV)))
+    ZARIM = ZALPHARM*ZRIF2(JLON, JLEV)
+    ZARIH = ZALPHARH*ZRIF2(JLON, JLEV)
+    ZFM_CLOUD(JLON, JLEV) = ZOFFSET + (ZALPHAN - (ZALPHACM - ZALPHAN)*(ZSEUILM*ZARIM + (1.0_JPRB - ZSEUILM)*ATAN(ZARIM)) / ZPIS2)
+    ZFH_CLOUD(JLON, JLEV) = ZOFFSET + (ZALPHAN - (ZALPHACH - ZALPHAN)*(ZSEUILH*ZARIH + (1.0_JPRB - ZSEUILH)*ATAN(ZARIH)) / ZPIS2)
+  END DO
+  
+  
+  !*
+  !     -------------------------------------------------------------------------------
+  !     2 - CALCULS DE Lup, Ldown, Lint, Lmin,  Ls et La longueur finale sur les "half"
+  !     -------------------------------------------------------------------------------
+  
+  
+  ! En haut et en bas
+  
+  ZLUPM_CLEAR(JLON, KLEV) = 0.0_JPRB
+  ZLDNM_CLEAR(JLON, 1) = 0.0_JPRB
+  ZLUPH_CLEAR(JLON, KLEV) = 0.0_JPRB
+  ZLDNH_CLEAR(JLON, 1) = 0.0_JPRB
+  ZLUPM_CLOUD(JLON, KLEV) = 0.0_JPRB
+  ZLDNM_CLOUD(JLON, 1) = 0.0_JPRB
+  ZLUPH_CLOUD(JLON, KLEV) = 0.0_JPRB
+  ZLDNH_CLOUD(JLON, 1) = 0.0_JPRB
+  
+  !!  Calcul de ZGZTOP et ZGZBOT de la cvpp et de la cvp
+  
+  ZGZTOP = 0.0_JPRB
+  ZGZBOT = 100000.0_JPRB
+  
+  ZGZTOPCVP = 0.0_JPRB
+  ZGZBOTCVP = 100000.0_JPRB
+  
+  DO JLEV=KTDIAN,KLEV
+    ZGZTOP = MAX(ZGZTOP, PAPHIF(JLON, JLEV)*PNLAB(JLON, JLEV))
+    ZGZBOT = (1.0_JPRB - PNLAB(JLON, JLEV))*ZGZBOT + PNLAB(JLON, JLEV)*MIN(ZGZBOT, PAPHIF(JLON, JLEV))
+  END DO
+  
+  DO JLEV=KTDIAN,KLEV
+    ZGZTOPCVP = MAX(ZGZTOPCVP, PAPHIF(JLON, JLEV)*PNLABCVP(JLON, JLEV))
+    ZGZBOTCVP = (1.0_JPRB - PNLABCVP(JLON, JLEV))*ZGZBOTCVP + PNLABCVP(JLON, JLEV)*MIN(ZGZBOTCVP, PAPHIF(JLON, JLEV))
+  END DO
+  
+  !  Calcul de Lup
+  
+  DO JLEV=KLEV - 1,1,-1
+    ZLUPM_CLEAR(JLON, JLEV) =  &
+    & MAX(0.0_JPRB, ZLUPM_CLEAR(JLON, JLEV + 1) + ZFM_CLEAR(JLON, JLEV + 1)*(PAPHI(JLON, JLEV) - PAPHI(JLON, JLEV + 1)))
+    ZLUPH_CLEAR(JLON, JLEV) =  &
+    & MAX(0.0_JPRB, ZLUPH_CLEAR(JLON, JLEV + 1) + ZFH_CLEAR(JLON, JLEV + 1)*(PAPHI(JLON, JLEV) - PAPHI(JLON, JLEV + 1)))
+    ZLUPM_CLOUD(JLON, JLEV) =  &
+    & MAX(0.0_JPRB, ZLUPM_CLOUD(JLON, JLEV + 1) + ZFM_CLOUD(JLON, JLEV + 1)*(PAPHI(JLON, JLEV) - PAPHI(JLON, JLEV + 1)))
+    ZLUPH_CLOUD(JLON, JLEV) =  &
+    & MAX(0.0_JPRB, ZLUPH_CLOUD(JLON, JLEV + 1) + ZFH_CLOUD(JLON, JLEV + 1)*(PAPHI(JLON, JLEV) - PAPHI(JLON, JLEV + 1)))
+  END DO
+  
+  !  Calcul de Ldown
+  
+  DO JLEV=2,KLEV
+    ZLDNM_CLEAR(JLON, JLEV) =  &
+    & MAX(0.0_JPRB, ZLDNM_CLEAR(JLON, JLEV - 1) + ZFM_CLEAR(JLON, JLEV)*(PAPHI(JLON, JLEV - 1) - PAPHI(JLON, JLEV)))
+    ZLDNH_CLEAR(JLON, JLEV) =  &
+    & MAX(0.0_JPRB, ZLDNH_CLEAR(JLON, JLEV - 1) + ZFH_CLEAR(JLON, JLEV)*(PAPHI(JLON, JLEV - 1) - PAPHI(JLON, JLEV)))
+    ZLDNM_CLOUD(JLON, JLEV) =  &
+    & MAX(0.0_JPRB, ZLDNM_CLOUD(JLON, JLEV - 1) + ZFM_CLOUD(JLON, JLEV)*(PAPHI(JLON, JLEV - 1) - PAPHI(JLON, JLEV)))
+    ZLDNH_CLOUD(JLON, JLEV) =  &
+    & MAX(0.0_JPRB, ZLDNH_CLOUD(JLON, JLEV - 1) + ZFH_CLOUD(JLON, JLEV)*(PAPHI(JLON, JLEV - 1) - PAPHI(JLON, JLEV)))
+  END DO
+  
+  DO JLEV=KTDIAN,KLEV - 1
+    
+    ! On majore par la hauteur de cvpp et de cvp
+    
+    IF (YDPHY%LECSHAL) THEN
+      ZLUPM_CLEAR(JLON, JLEV) = MAX(ZLUPM_CLEAR(JLON, JLEV), PNLAB(JLON, JLEV)*(ZGZTOP - PAPHI(JLON, JLEV)))
+      ZLUPM_CLOUD(JLON, JLEV) = MAX(ZLUPM_CLOUD(JLON, JLEV), PNLAB(JLON, JLEV)*(ZGZTOP - PAPHI(JLON, JLEV)))
+      ZLUPH_CLEAR(JLON, JLEV) = MAX(ZLUPH_CLEAR(JLON, JLEV), PNLAB(JLON, JLEV)*(ZGZTOP - PAPHI(JLON, JLEV)))
+      ZLUPH_CLOUD(JLON, JLEV) = MAX(ZLUPH_CLOUD(JLON, JLEV), PNLAB(JLON, JLEV)*(ZGZTOP - PAPHI(JLON, JLEV)))
+      
+      ZLDNM_CLEAR(JLON, JLEV) = MAX(ZLDNM_CLEAR(JLON, JLEV), PNLAB(JLON, JLEV)*(PAPHI(JLON, JLEV) - ZGZBOT))
+      ZLDNM_CLOUD(JLON, JLEV) = MAX(ZLDNM_CLOUD(JLON, JLEV), PNLAB(JLON, JLEV)*(PAPHI(JLON, JLEV) - ZGZBOT))
+      ZLDNH_CLEAR(JLON, JLEV) = MAX(ZLDNH_CLEAR(JLON, JLEV), PNLAB(JLON, JLEV)*(PAPHI(JLON, JLEV) - ZGZBOT))
+      ZLDNH_CLOUD(JLON, JLEV) = MAX(ZLDNH_CLOUD(JLON, JLEV), PNLAB(JLON, JLEV)*(PAPHI(JLON, JLEV) - ZGZBOT))
+    END IF
+    IF (YDPHY%LECDEEP) THEN
+      ZGZLCVPUP = MIN(YDCST%RG*YDPHY0%ALMAVX, ZGZTOPCVP - PAPHI(JLON, JLEV))
+      ZGZLCVPDN = MIN(YDCST%RG*YDPHY0%ALMAVX, PAPHI(JLON, JLEV) - ZGZBOTCVP)
+      ZLUPM_CLEAR(JLON, JLEV) = MAX(ZLUPM_CLEAR(JLON, JLEV), PNLABCVP(JLON, JLEV)*ZGZLCVPUP)
+      ZLUPM_CLOUD(JLON, JLEV) = MAX(ZLUPM_CLOUD(JLON, JLEV), PNLABCVP(JLON, JLEV)*ZGZLCVPUP)
+      ZLUPH_CLEAR(JLON, JLEV) = MAX(ZLUPH_CLEAR(JLON, JLEV), PNLABCVP(JLON, JLEV)*ZGZLCVPUP)
+      ZLUPH_CLOUD(JLON, JLEV) = MAX(ZLUPH_CLOUD(JLON, JLEV), PNLABCVP(JLON, JLEV)*ZGZLCVPUP)
+      
+      ZLDNM_CLEAR(JLON, JLEV) = MAX(ZLDNM_CLEAR(JLON, JLEV), PNLABCVP(JLON, JLEV)*ZGZLCVPDN)
+      ZLDNM_CLOUD(JLON, JLEV) = MAX(ZLDNM_CLOUD(JLON, JLEV), PNLABCVP(JLON, JLEV)*ZGZLCVPDN)
+      ZLDNH_CLEAR(JLON, JLEV) = MAX(ZLDNH_CLEAR(JLON, JLEV), PNLABCVP(JLON, JLEV)*ZGZLCVPDN)
+      ZLDNH_CLOUD(JLON, JLEV) = MAX(ZLDNH_CLOUD(JLON, JLEV), PNLABCVP(JLON, JLEV)*ZGZLCVPDN)
+    END IF
+    
+    ! jlon
+  END DO
+  ! Jlev
+  
+  !IF (LECTLIM) THEN
+  !Limitation de Ldown
+  DO JLEV=2,KLEV
+    ZPHIH = PAPHI(JLON, JLEV) - PAPHI(JLON, KLEV) + PGZ0(JLON)
+    ZLDNH_CLEAR(JLON, JLEV) = MIN(ZPHIH, ZLDNH_CLEAR(JLON, JLEV))
+    ZLDNH_CLOUD(JLON, JLEV) = MIN(ZPHIH, ZLDNH_CLOUD(JLON, JLEV))
+    ZLDNM_CLEAR(JLON, JLEV) = MIN(ZPHIH, ZLDNM_CLEAR(JLON, JLEV))
+    ZLDNM_CLOUD(JLON, JLEV) = MIN(ZPHIH, ZLDNM_CLOUD(JLON, JLEV))
+  END DO
+  !ENDIF
+  
+  DO JLEV=1,KLEV
+    
+    !  Calcul de Lint
+    
+    ZLINTM_CLEAR(JLON, JLEV) =  &
+    & (ZLDNM_CLEAR(JLON, JLEV)*ZLUPM_CLEAR(JLON, JLEV)) / MAX(1.0E-10_JPRB, ZLDNM_CLEAR(JLON, JLEV) + ZLUPM_CLEAR(JLON, JLEV))
+    ZLINTH_CLEAR(JLON, JLEV) =  &
+    & (ZLDNH_CLEAR(JLON, JLEV)*ZLUPH_CLEAR(JLON, JLEV)) / MAX(1.0E-10_JPRB, ZLDNH_CLEAR(JLON, JLEV) + ZLUPH_CLEAR(JLON, JLEV))
+    ZLINTM_CLOUD(JLON, JLEV) =  &
+    & (ZLDNM_CLOUD(JLON, JLEV)*ZLUPM_CLOUD(JLON, JLEV)) / MAX(1.0E-10_JPRB, ZLDNM_CLOUD(JLON, JLEV) + ZLUPM_CLOUD(JLON, JLEV))
+    ZLINTH_CLOUD(JLON, JLEV) =  &
+    & (ZLDNH_CLOUD(JLON, JLEV)*ZLUPH_CLOUD(JLON, JLEV)) / MAX(1.0E-10_JPRB, ZLDNH_CLOUD(JLON, JLEV) + ZLUPH_CLOUD(JLON, JLEV))
+    
+    !  Calcul de Ls
+    
+    ZCM_CLEAR = ZCH*MIN(1.0_JPRB, MAX(3.0_JPRB, 1.0_JPRB + 2.0_JPRB*ZRIF(JLON, JLEV)))
+    ZCM_CLOUD = ZCH*MIN(1.0_JPRB, MAX(3.0_JPRB, 1.0_JPRB + 2.0_JPRB*ZRIF2(JLON, JLEV)))
+    
+    !      ZCM_CLEAR = ZCH*MIN(3.0_JPRB,1.0_JPRB+2.0_JPRB*ZRIF(JLON,JLEV))
+    !      ZCM_CLOUD = ZCH*MIN(3.0_JPRB,1.0_JPRB+2.0_JPRB*ZRIF2(JLON,JLEV))
+    
+    ZLSM_CLEAR(JLON, JLEV) = ZCM_CLEAR*SQRT(PECT(JLON, JLEV) / ZNN_CLEAR(JLON, JLEV))
+    ZLSH_CLEAR(JLON, JLEV) = ZCH*SQRT(PECT(JLON, JLEV) / ZNN_CLEAR(JLON, JLEV))
+    ZLSM_CLOUD(JLON, JLEV) = ZCM_CLOUD*SQRT(PECT(JLON, JLEV) / ZNN_CLOUD(JLON, JLEV))
+    ZLSH_CLOUD(JLON, JLEV) = ZCH*SQRT(PECT(JLON, JLEV) / ZNN_CLOUD(JLON, JLEV))
+    
+    !  Calcul de Lmin
+    
+    !      ZC1 = 0.5_JPRB*ZCN*RKAPPA*PAPHI(JLON,JLEV)/RG
+    ZC1 = ZCN*YDCST%RKAPPA*PAPHI(JLON, JLEV) / YDCST%RG
+    ZLMIN(JLON, JLEV) = ZLINF*ZC1 / (ZC1 + ZLINF)
+    
+    
+    !  Calcul de ZLEND selon  B.4
+    
+    ZC3M_CLEAR = ZLINTM_CLEAR(JLON, JLEV)*ZLINTM_CLEAR(JLON, JLEV) + ZLMIN(JLON, JLEV)*ZLMIN(JLON, JLEV)
+    ZC3H_CLEAR = ZLINTH_CLEAR(JLON, JLEV)*ZLINTH_CLEAR(JLON, JLEV) + ZLMIN(JLON, JLEV)*ZLMIN(JLON, JLEV)
+    ZLENDM_CLEAR(JLON, JLEV) =  &
+    & SQRT(2.0_JPRB)*ZLSM_CLEAR(JLON, JLEV)*SQRT(ZC3M_CLEAR / (ZLSM_CLEAR(JLON, JLEV)*ZLSM_CLEAR(JLON, JLEV) + ZC3M_CLEAR))
+    ZLENDH_CLEAR(JLON, JLEV) =  &
+    & SQRT(2.0_JPRB)*ZLSH_CLEAR(JLON, JLEV)*SQRT(ZC3H_CLEAR / (ZLSH_CLEAR(JLON, JLEV)*ZLSH_CLEAR(JLON, JLEV) + ZC3H_CLEAR))
+    
+    ZC3M_CLOUD = ZLINTM_CLOUD(JLON, JLEV)*ZLINTM_CLOUD(JLON, JLEV) + ZLMIN(JLON, JLEV)*ZLMIN(JLON, JLEV)
+    ZC3H_CLOUD = ZLINTH_CLOUD(JLON, JLEV)*ZLINTH_CLOUD(JLON, JLEV) + ZLMIN(JLON, JLEV)*ZLMIN(JLON, JLEV)
+    ZLENDM_CLOUD(JLON, JLEV) =  &
+    & SQRT(2.0_JPRB)*ZLSM_CLOUD(JLON, JLEV)*SQRT(ZC3M_CLOUD / (ZLSM_CLOUD(JLON, JLEV)*ZLSM_CLOUD(JLON, JLEV) + ZC3M_CLOUD))
+    ZLENDH_CLOUD(JLON, JLEV) =  &
+    & SQRT(2.0_JPRB)*ZLSH_CLOUD(JLON, JLEV)*SQRT(ZC3H_CLOUD / (ZLSH_CLOUD(JLON, JLEV)*ZLSH_CLOUD(JLON, JLEV) + ZC3H_CLOUD))
+    
+  END DO
+  
+  ! Calcul de la longueur moyenne sur la maille
+  
+  IF (YDPHY%NLEND == 3) THEN
+    
+    !  Le probléme est que l'on ne connait pas ZNEB. Dans le cas LECTNEB il faut refaire des
+    !  calculs internes à ACTURB, en gros le calcul de sigmaS
+    
+    !  Les calculs ont lieu sur les half, theta doit être connu sur les fulls
+    
+    ZEPSIG = 1.E-12_JPRB
+    ZEPDELT = 1.E-12_JPRB
+    ZEPSQ = 1.E-12_JPRB
+    ZEPNEBS = 1.E-12_JPRB
+    ZNEB(JLON, :) = 0.0_JPRB
+    ZNEBI(JLON, :) = 0.0_JPRB
+    
+    DO JLEV=KTDIAN,KLEV - 1
+      
+      ZTF1 = PT(JLON, JLEV)
+      ZQCF1 = PQLI(JLON, JLEV) + PQICE(JLON, JLEV)
+      ZQWF1 = PQV(JLON, JLEV) + PQLI(JLON, JLEV) + PQICE(JLON, JLEV)
+      ZQWF1 = MAX(ABS(ZQWF1), ZEPSQ)
+      ZLSCPEF1 = PLSCPE(JLON, JLEV)
+      ZTLF1 = ZTF1 - ZLSCPEF1*ZQCF1
+      ZH1 = MAX(0.0_JPRB, SIGN(1.0_JPRB, YDCST%RTT - ZTLF1))
+      ZEW1 = FOEW(ZTLF1, ZH1) / PAPRSF(JLON, JLEV)
+      ZQSATF1 = FOQS(ZEW1)
+      ZDLEWF1 = FODLEW(ZTLF1, ZH1)
+      ZQSLTLF1 = FODQS(ZQSATF1, ZEW1, ZDLEWF1)
+      ZTHETAL1 = ZTHETA(JLON, JLEV)*(1.0_JPRB - ZLSCPEF1*ZQCF1 / ZTF1)
+      ZDELTQF1 = ZQWF1 - ZQSATF1
+      ZDELTQF1 = SIGN(MAX(ABS(ZDELTQF1), ZEPDELT), ZDELTQF1)
+      
+      ZTF2 = PT(JLON, JLEV + 1)
+      ZQCF2 = PQLI(JLON, JLEV + 1) + PQICE(JLON, JLEV + 1)
+      ZQWF2 = PQV(JLON, JLEV + 1) + PQLI(JLON, JLEV + 1) + PQICE(JLON, JLEV + 1)
+      ZQWF2 = MAX(ABS(ZQWF2), ZEPSQ)
+      ZLSCPEF2 = PLSCPE(JLON, JLEV + 1)
+      ZTLF2 = ZTF2 - ZLSCPEF2*ZQCF2
+      ZH2 = MAX(0.0_JPRB, SIGN(1.0_JPRB, YDCST%RTT - ZTLF2))
+      ZEW2 = FOEW(ZTLF2, ZH2) / PAPRSF(JLON, JLEV + 1)
+      ZQSATF2 = FOQS(ZEW2)
+      ZDLEWF2 = FODLEW(ZTLF2, ZH2)
+      ZQSLTLF2 = FODQS(ZQSATF2, ZEW2, ZDLEWF2)
+      ZTHETAL2 = ZTHETA(JLON, JLEV + 1)*(1.0_JPRB - ZLSCPEF2*ZQCF2 / ZTF2)
+      ZDELTQF2 = ZQWF2 - ZQSATF2
+      ZDELTQF2 = SIGN(MAX(ABS(ZDELTQF2), ZEPDELT), ZDELTQF2)
+      
+      ZTH = (ZTF1 + ZTF2) / 2.0_JPRB
+      ZQSLTLH = (ZQSLTLF1 + ZQSLTLF2) / 2.0_JPRB
+      ZLSCPEH = (ZLSCPEF1 + ZLSCPEF2) / 2.0_JPRB
+      ZDELTQH(JLON, JLEV) = (ZDELTQF1 + ZDELTQF2) / 2.0_JPRB
+      ZTHETAH = ZTH*(YDCST%RATM / PAPRS(JLON, JLEV))**YDCST%RKAPPA
+      ZBB = ZTH*ZQSLTLH / ZTHETAH
+      ZDTHETAL = ZTHETAL1 - ZTHETAL2
+      ZDPHI = PAPHIF(JLON, JLEV) - PAPHIF(JLON, JLEV + 1)
+      ZDQW = PQV(JLON, JLEV) - PQV(JLON, JLEV + 1) + PQLI(JLON, JLEV) - PQLI(JLON, JLEV + 1) + PQICE(JLON, JLEV) - PQICE(JLON,  &
+      & JLEV + 1)
+      
+      ZAA(JLON, JLEV) = 1.0_JPRB / (1.0_JPRB + ZLSCPEH*ZQSLTLH)
+      
+      ZIGMAS_CLOUD(JLON, JLEV) =  &
+      & MAX(ZEPSIG, ABS(0.2_JPRB*ZLENDM_CLOUD(JLON, JLEV)*ZAA(JLON, JLEV)*(ZDQW - ZBB*ZDTHETAL) / ZDPHI))
+      ZIGMAS_CLEAR(JLON, JLEV) =  &
+      & MAX(ZEPSIG, ABS(0.2_JPRB*ZLENDM_CLEAR(JLON, JLEV)*ZAA(JLON, JLEV)*(ZDQW - ZBB*ZDTHETAL) / ZDPHI))
+      
+      ZNEBI(JLON, JLEV) = MAX(0.0_JPRB, SIGN(1.0_JPRB, ZTH - YDCST%RTT))        ! <== on se limite aux nuages chauds
+    END DO
+    
+    
+    !  Boucle de Newton pour le calcul de ZNEB
+    
+    
+    DO JN=1,3
+      !<== Boucle de Newton à trois itérations
+      DO JLEV=KTDIAN,KLEV - 1
+        ZIGMAS = ZNEB(JLON, JLEV)*ZIGMAS_CLOUD(JLON, JLEV) + (1.0_JPRB - ZNEB(JLON, JLEV))*ZIGMAS_CLEAR(JLON, JLEV)
+        ZRIH = ZNEB(JLON, JLEV)*ZRI2(JLON, JLEV) + (1.0_JPRB - ZNEB(JLON, JLEV))*ZRI(JLON, JLEV)
+        ZRESUL = MAX(0.0_JPRB, SIGN(1.0_JPRB, YDPHY0%RICRET - ZRIH))
+        ZSURSAT = MAX(0.0_JPRB, SIGN(1.0_JPRB, ZDELTQH(JLON, JLEV)))
+        ZQ11 = ZAA(JLON, JLEV)*ZDELTQH(JLON, JLEV) / (2*ZIGMAS)
+        INQ1 = MIN(MAX(-22, FLOOR(2*ZQ11)), 10)
+        ZINC = 2.0_JPRB*ZQ11 - INQ1
+        !          ZNEB(JLON,JLEV) = ZNEBI(JLON,JLEV)* &
+        !          &         MIN(1.0_JPRB,(1.0_JPRB-ZINC)*YDPHY0%RN1D(INQ1)+ZINC*YDPHY0%RN1D(INQ1+1))
+        ZZN1D = MIN(1.0_JPRB, (1.0_JPRB - ZINC)*YDPHY0%RN1D(INQ1) + ZINC*YDPHY0%RN1D(INQ1 + 1))
+        ZNEB(JLON, JLEV) = (ZZN1D*ZRESUL + ZSURSAT*(1.0_JPRB - ZRESUL))*YDPHY0%RFACNSM
+        !         ZNEB(JLON,JLEV) = MAX( ZEPNEBS ,MIN(ZNEB(JLON,JLEV), 1.0_JPRB-ZEPNEBS) )
+        ZNEB(JLON, JLEV) = ZNEBI(JLON, JLEV)*MAX(ZEPNEBS, MIN(ZNEB(JLON, JLEV), 0.5_JPRB))
+      END DO
+    END DO
+    
+    !  Calcul des longueurs finales
+    
+    DO JLEV=1,KLEV
+      ZLENDM(JLON, JLEV) = ZNEB(JLON, JLEV)*ZLENDM_CLOUD(JLON, JLEV) + (1.0_JPRB - ZNEB(JLON, JLEV))*ZLENDM_CLEAR(JLON, JLEV)
+      ZLENDH(JLON, JLEV) = ZNEB(JLON, JLEV)*ZLENDH_CLOUD(JLON, JLEV) + (1.0_JPRB - ZNEB(JLON, JLEV))*ZLENDH_CLEAR(JLON, JLEV)
+      !         ZLENDH(JLON,JLEV) = ZLENDH_CLEAR(JLON,JLEV)
+    END DO
+  ELSE
+    DO JLEV=1,KLEV
+      ZLENDM(JLON, JLEV) = ZLENDM_CLEAR(JLON, JLEV)
+      ZLENDH(JLON, JLEV) = ZLENDH_CLEAR(JLON, JLEV)
+    END DO
+  END IF
+  
+  !  Lissage verticale de la longueur de mélange
+  
+  DO JLEV=2,KLEV - 1
+    ZLENDMM(JLON, JLEV) = 0.5_JPRB*ZLENDM(JLON, JLEV) + 0.25_JPRB*ZLENDM(JLON, JLEV - 1) + 0.25_JPRB*ZLENDM(JLON, JLEV + 1)
+  END DO
+  ZLENDMM(JLON, KLEV) = 0.75_JPRB*ZLENDM(JLON, KLEV) + 0.25_JPRB*ZLENDM(JLON, KLEV - 1)
+  ZLENDMM(JLON, 1) = 0.75_JPRB*ZLENDM(JLON, 1) + 0.25_JPRB*ZLENDM(JLON, 2)
+  
+  DO JLEV=1,KLEV
+    !DEC$ IVDEP
+    
+    !  Limitation par ALMAVE comme dans ACBL89
+    
+    ZPHIH = PAPHI(JLON, JLEV) - PAPHI(JLON, KLEV) + PGZ0(JLON)
+    ZGLKARMN = YDPHY0%VKARMN*ZPHIH
+    ZGLMINF(JLON, JLEV) = MIN(YDCST%RG*YDPHY0%ALMAVE, ZGLKARMN)
+    
+    !  Calcul de PUSLE et multiplication par G de ZLEND
+    
+    !      PLEND(JLON,JLEV) = MAX(RG*ZLENDM(JLON,JLEV),ZGLMINF(JLON,JLEV))
+    PLEND(JLON, JLEV) = MAX(YDCST%RG*ZLENDMM(JLON, JLEV), ZGLMINF(JLON, JLEV))
+    PUSLE(JLON, JLEV) = 1.0_JPRB / (YDPHY0%ALD*PLEND(JLON, JLEV))
+    !      PPHI3 (JLON,JLEV)=ZLENDH(JLON,JLEV)/ZLENDM(JLON,JLEV)
+  END DO
+  
+  !  Calcul de PHI3
+  
+  ZPHI3MAX = (1.0_JPRB - YDPHY0%ACBRPHIM) / YDPHY0%ACBRPHIM
+  DO JLEV=1,KLEV - 1
+    !DEC$ IVDEP
+    ZPHI3I = 1._JPRB + MAX(ZPHI3MAX, YDPHY0%ARSC1*MIN(2.0_JPRB, PLEND(JLON, JLEV)*PLEND(JLON, JLEV) / ZG2LD2(JLON, JLEV)))
+    PPHI3(JLON, JLEV) = 1._JPRB / ZPHI3I
+    !     PPHI3 (JLON,JLEV)= PPHI3 (JLON,JLEV) / ZPHI3I
+  END DO
+  PPHI3(JLON, KLEV) = 1._JPRB
+  
+  
+  
+  !*
+  !     ------------------------------------------------------------------
+  
+END SUBROUTINE ACLENDER_OPENACC

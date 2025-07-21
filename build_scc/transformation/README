@@ -1,0 +1,3 @@
+main.py : call the transformation from the bash scripts
+openacc_setup.py : setting up the transformation : changing files for inlining, init some arrays...
+openacc_transform.py : contains the transformation

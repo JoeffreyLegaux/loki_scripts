@@ -17,8 +17,7 @@ import sys, traceback
 #===================================================================================================
 # Importing SCC transforms from Erwan 
 #===================================================================================================
-#sys.path.append('/home/legaux/meteo/models/build_scc_erwan/transformation/')
-sys.path.append('/home/ext/cf/ccom/legauxj/gpupack/build_scc/transformation/')
+sys.path.append('../build_scc/transformation/')
 
 try :
     from openacc_transform import scc_transform_routine, alloc_temp, assoc_alloc_pt
@@ -100,6 +99,7 @@ true_symbols, false_symbols=logical_lst.symbols()
 acdc_logger = info # perf pour log fichier
 
 source_path = '../../loki_big_kernel/src/'
+#source_path = '../../loki_WIP/src/'
 #source_path = '../../loki_small_kernels_2/src/'
 
 output_path = source_path + 'local/'

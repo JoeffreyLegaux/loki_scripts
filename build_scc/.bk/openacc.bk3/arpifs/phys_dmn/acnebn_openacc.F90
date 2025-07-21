@@ -1,0 +1,676 @@
+SUBROUTINE ACNEBN_OPENACC (YDCST, YDML_PHY_MF, KIDIA, KFDIA, KLON, KTDIA, KLEV, PAPHIF, PCP, PQ, PQL, PQI, PQSAT, PT, PFPLC,  &
+& PDELP, PRDELP, PAPRSF, PUNEBH, PNEBS, PQLIS, PQLI_CVP, PNEB_CVPP, PQLI_CVPP, PAIPCMT, PNEB, PNEBC, PQICE, PQLI, YDSTA, YDSTACK)
+  !-----------------------------------------------------------------------
+  ! - INPUT  2D .
+  ! - INPUT  1D .
+  ! - OUTPUT 2D .
+  ! - CONSTANTES .
+  
+  !**** *ACNEBN * - CALCUL DES DIAGNOSTICS NUAGEUX .
+  
+  !     Sujet.
+  !     ------
+  !     - ROUTINE DE CALCUL ACTIF .
+  !       CALCUL DES DIAGNOSTICS NUAGEUX .
+  
+  !**   Interface.
+  !     ----------
+  !        *CALL* *ACNEBN*
+  
+  !-----------------------------------------------------------------------
+  ! WARNING: THE ENGLISH VERSION OF VARIABLES' NAMES IS TO BE READ IN THE
+  !          "APLPAR" CODE.
+  !-----------------------------------------------------------------------
+  
+  ! -   ARGUMENTS D'ENTREE.
+  !     -------------------
+  
+  ! - NOM DES PARAMETRES DE DIMENSIONNEMENT DE LA PHYSIQUE.
+  
+  ! KIDIA      : INDICE DE DEPART DES BOUCLES VECTORISEES SUR L'HORIZONT..
+  ! KFDIA      : INDICE DE FIN DES BOUCLES VECTORISEES SUR L'HORIZONTALE.
+  ! KLON       : DIMENSION HORIZONTALE DES TABLEAUX.
+  ! KTDIA      : INDICE DE DEPART DES BOUCLES VERTICALES (1 EN GENERAL).
+  ! KLEV       : DIMENSION VERTICALE DES TABLEAUX "FULL LEVEL".
+  
+  ! - NOM DES VARIABLES DE LA PHYSIQUE (PAR ORDRE ALPHABETIQUE DANS CHAQUE
+  !   CATEGORIE).
+  
+  ! - 2D (1:KLEV) .
+  
+  ! PFPLC      : PRECIPITATIONS CONVECTIVES.
+  ! PQ         : HUMIDITE SPECIFIQUE DE LA VAPEUR D'EAU.
+  ! PQL        : HUMIDITE SPECIFIQUE DE L'EAU CONDENSEE LIQUIDE.
+  ! PQI        : HUMIDITE SPECIFIQUE DE L'EAU CONDENSEE SOLIDE.
+  ! PQSAT      : HUMIDITE SPECIFIQUE DE SATURATION.
+  ! PRDELP     : INVERSE DE L'EPAISSEUR EN PRESSION DE LA COUCHE.
+  ! PAPRSF     : PRESSION AUX NIVEAUX DES COUCHES.
+  ! PT         : TEMPERATURE.
+  
+  ! - 2D (1:KLEV) .
+  
+  ! PNEBS      : NEBULOSITE STRATIFORME
+  ! PQLIS      : CONDENSATS NUAGEUX STRATIFORME
+  ! PQLI_CVP  : CONDENSATS NUAGEUX CONVECTION PROFONDE
+  ! PNEB_CVPP  : NEBULOSITE CONVECTION PEU PROFONDE
+  ! PQLI_CVPP  : CONDENSATS NUAGEUX CONVECTION PEU PROFONDE
+  
+  ! - 1D .
+  
+  ! PAIPCMT  : ACTIVITY INDEX OF PCMT: 1. IF PCMT IS ACTIVE, 0. ELSE CASE.
+  
+  ! - CONSTANTES .
+  
+  ! PHUC(KLEV) : HUMIDITE CRITIQUE (PAR NIVEAU) POUR LE CALCUL DE PNEB.
+  ! PVETAF(KLEV) : COORDONNEE ETA AUX NIVEAUX.
+  
+  !-----------------------------------------------------------------------
+  
+  ! -   ARGUMENTS DE SORTIE.
+  !     --------------------
+  
+  ! - 2D (1:KLEV) .
+  
+  ! PNEB       : NEBULOSITE PARTIELLE "RADIATIVE".
+  ! PNEBC      : NEBULOSITE CONVECTIVE "RADIATIVE".
+  ! PQICE      : HUMIDITE SPECIFIQUE SOLIDE "RADIATIVE".
+  ! PQLI       : HUMIDITE SPECIFIQUE LIQUIDE "RADIATIVE".
+  
+  !-----------------------------------------------------------------------
+  
+  ! -   ARGUMENTS IMPLICITES.
+  !     ---------------------
+  
+  !-----------------------------------------------------------------------
+  
+  !     Externes.
+  !     ---------
+  
+  !     Methode.
+  !     --------
+  
+  !     Auteur.
+  !     -------
+  !      97-02, J.M. Piriou.
+  
+  !     Modifications.
+  !     --------------
+  !      2001-11, Reproductibilite en KLON du calcul - J.M. Piriou / J.F. Geleyn.
+  !      2002-02, (i) Eau liquide de CVPP par simple boucle verticale (ii) nebulosite type Xu et Randall - J.M. Piriou.
+  !      2002-10, Change definition of PQLI and PQICE: they become grid-size values - J.M. Piriou. (phasage Y. Bouteloup)
+  !      2003-02, Suppression THETAV - F. Bouyssel
+  !      2003-03, Remplacement de QSUSX par QSUSXC et QSUSXS - F. Bouyssel
+  !      M.Hamrud      01-Oct-2003 CY28 Cleaning
+  !      2004-09, Amelioration de QSAT en cas d'inversion thermique - R. Brozkova
+  !      2005-03, Change due to Lopez microphysics - F. Bouyssel
+  !      2005-07, Introduction of LRNUMX in Lopez microphysics - F. Bouyssel
+  !      2006-10, Specific autoconversion thresholds for convection - F. Bouyssel
+  !      03-Oct-2006, ALARO-0 phasing (PQL, PQI, L3MT, LSTRAPRO) - M. Bellus
+  !      2007-02, Convective condensate calculation for 3MT - J.F. Geleyn
+  !      2007-02, Externalisation du calcul des nebulosites partielles - R. Brozkova
+  !      2007-05, Cloud water from the shallow convection (used with the AROME scheme) - E. Bazile
+  !      2008-05, remove the Cloud water from the shallow convection ! - E. Bazile
+  !      K. Yessad (Jul 2009): remove CDLOCK + some cleanings
+  !      2010-12, Introduction of shallow cloudiness - F. Bouyssel
+  !      2011-11, Diagnostic convective clouds with LNCVPGY - J.F. Gueremy
+  !      2012-01, Cloudiness from PCMT convection scheme - J.M. Piriou.
+  !      2012-02, Fully prognostic cloudiness ("stratiform class" + moist deep) - R. Brozkova
+  !      2016-10, Port to single precision - P. Marguinaud
+  !     R. El Khatib 22-Jun-2022 A contribution to simplify phasing after the refactoring of YOMCLI/YOMCST/YOETHF.
+  !-----------------------------------------------------------------------
+  
+!$acc routine( ACNEBN_OPENACC ) seq
+  
+  USE MODEL_PHYSICS_MF_MOD, ONLY: MODEL_PHYSICS_MF_TYPE
+  USE PARKIND1, ONLY: JPIM, JPRB, JPRD
+  USE YOMHOOK, ONLY: LHOOK, DR_HOOK, JPHOOK
+  
+  USE YOMCST, ONLY: TCST
+  USE YOMSTA, ONLY: TSTA
+  
+  !-----------------------------------------------------------------------
+  
+  USE STACK_MOD
+#include "stack.h"
+  
+  IMPLICIT NONE
+  
+  TYPE(TCST), INTENT(IN) :: YDCST
+  TYPE(MODEL_PHYSICS_MF_TYPE), INTENT(IN) :: YDML_PHY_MF
+  INTEGER(KIND=JPIM), INTENT(IN) :: KLON
+  INTEGER(KIND=JPIM), INTENT(IN) :: KLEV
+  INTEGER(KIND=JPIM), INTENT(IN) :: KIDIA
+  INTEGER(KIND=JPIM), INTENT(IN) :: KFDIA
+  INTEGER(KIND=JPIM), INTENT(IN) :: KTDIA
+  REAL(KIND=JPRB), INTENT(IN) :: PAPHIF(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PCP(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PQ(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PQL(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PQI(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PQSAT(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PT(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PFPLC(KLON, 0:KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PDELP(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PRDELP(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PAPRSF(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PUNEBH(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PNEBS(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PQLIS(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PQLI_CVP(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PNEB_CVPP(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PQLI_CVPP(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PAIPCMT(KLON)
+  REAL(KIND=JPRB), INTENT(INOUT) :: PNEB(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(INOUT) :: PNEBC(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(OUT) :: PQICE(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(OUT) :: PQLI(KLON, KLEV)
+  TYPE(TSTA), INTENT(IN) :: YDSTA
+  
+  !-----------------------------------------------------------------------
+  
+  temp (REAL (KIND=JPRB), ZS, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZSDELP, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZQSSTPP, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZQS, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZQSC, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZQSS, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZQSAT, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZTGRAD, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZINQ, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZSNEBC, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZSUSXC, (KLON, KLEV))
+  temp (REAL (KIND=JPRB), ZFACQSC, (KLON, KLEV))
+  REAL(KIND=JPRB) :: ZSUM
+  REAL(KIND=JPRB) :: ZPHIREL1
+  INTEGER(KIND=JPIM) :: ILEVREF
+  INTEGER(KIND=JPIM) :: ILEVTES
+  
+  INTEGER(KIND=JPIM) :: JLEV
+  INTEGER(KIND=JPIM) :: JLON
+  INTEGER(KIND=JPIM) :: JLEV2
+  INTEGER(KIND=JPIM) :: ILEV
+  INTEGER(KIND=JPIM) :: ILEVX
+  INTEGER(KIND=JPIM) :: ILEVSIG
+  
+  REAL(KIND=JPRB) :: ZDELTA
+  REAL(KIND=JPRB) :: ZEPSNEB
+  REAL(KIND=JPRB) :: ZNEBS
+  REAL(KIND=JPRB) :: ZPLS
+  REAL(KIND=JPRB) :: ZDELTAP
+  REAL(KIND=JPRB) :: ZEPSDS
+  REAL(KIND=JPRB) :: ZDSN
+  REAL(KIND=JPRB) :: ZD3
+  REAL(KIND=JPRB) :: ZMASK1
+  REAL(KIND=JPRB) :: ZMASK2
+  REAL(KIND=JPRB) :: ZFRAC
+  REAL(KIND=JPRB) :: ZEPSQC
+  REAL(KIND=JPRB) :: ZSSUSS
+  REAL(KIND=JPRB) :: ZTFROID
+  REAL(KIND=JPRB) :: ZEW
+  REAL(KIND=JPRB) :: ZESP
+  REAL(KIND=JPRB) :: ZPHIRSQ
+  REAL(KIND=JPRB) :: ZPHIREL2
+  REAL(KIND=JPRB) :: ZICE
+  REAL(KIND=JPRB) :: ZQCR
+  REAL(KIND=JPRB) :: ZQICR
+  REAL(KIND=JPRB) :: ZARG1
+  REAL(KIND=JPRB) :: ZARG2
+  REAL(KIND=JPRB) :: ZALPH
+  REAL(KIND=JPRB) :: ZBETA
+  REAL(KIND=JPRB) :: ZTAUX
+  REAL(KIND=JPRB) :: ZQTOT
+  REAL(KIND=JPRB) :: ZEPS1
+  REAL(KIND=JPRB) :: ZEPS2
+  REAL(KIND=JPRB) :: ZARGLI
+  REAL(KIND=JPRB) :: ZRH
+  REAL(KIND=JPRB) :: ZRHEXP
+  REAL(KIND=JPRB) :: ZRHLIM
+  REAL(KIND=JPRB) :: ZRHLIMPR
+  REAL(KIND=JPRB) :: ZEXPR
+  REAL(KIND=JPRB) :: ZBIN
+  REAL(KIND=JPRB) :: ZNEBC_NON_PCMT
+  REAL(KIND=JPRB) :: ZNEB_NON_PCMT
+  REAL(KIND=JPRB) :: ZQLIS
+  
+  LOGICAL :: LLSC
+  LOGICAL :: LLSTRAT
+  REAL(KIND=JPHOOK) :: ZHOOK_HANDLE
+  
+  !-----------------------------------------------------------------------
+  
+#include "acnebxrs_openacc.intfb.h"
+#include "fcttrm.func.h"
+#include "fctdoi.func.h"
+  TYPE(STACK), INTENT(IN) :: YDSTACK
+  TYPE(STACK) :: YLSTACK
+  YLSTACK = YDSTACK
+  IF (KIND (ZS) == 8) THEN
+    alloc8 (ZS)
+  ELSE
+    IF (KIND (ZS) == 4) THEN
+      alloc4 (ZS)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZSDELP) == 8) THEN
+    alloc8 (ZSDELP)
+  ELSE
+    IF (KIND (ZSDELP) == 4) THEN
+      alloc4 (ZSDELP)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZQSSTPP) == 8) THEN
+    alloc8 (ZQSSTPP)
+  ELSE
+    IF (KIND (ZQSSTPP) == 4) THEN
+      alloc4 (ZQSSTPP)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZQS) == 8) THEN
+    alloc8 (ZQS)
+  ELSE
+    IF (KIND (ZQS) == 4) THEN
+      alloc4 (ZQS)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZQSC) == 8) THEN
+    alloc8 (ZQSC)
+  ELSE
+    IF (KIND (ZQSC) == 4) THEN
+      alloc4 (ZQSC)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZQSS) == 8) THEN
+    alloc8 (ZQSS)
+  ELSE
+    IF (KIND (ZQSS) == 4) THEN
+      alloc4 (ZQSS)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZQSAT) == 8) THEN
+    alloc8 (ZQSAT)
+  ELSE
+    IF (KIND (ZQSAT) == 4) THEN
+      alloc4 (ZQSAT)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZTGRAD) == 8) THEN
+    alloc8 (ZTGRAD)
+  ELSE
+    IF (KIND (ZTGRAD) == 4) THEN
+      alloc4 (ZTGRAD)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZINQ) == 8) THEN
+    alloc8 (ZINQ)
+  ELSE
+    IF (KIND (ZINQ) == 4) THEN
+      alloc4 (ZINQ)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZSNEBC) == 8) THEN
+    alloc8 (ZSNEBC)
+  ELSE
+    IF (KIND (ZSNEBC) == 4) THEN
+      alloc4 (ZSNEBC)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZSUSXC) == 8) THEN
+    alloc8 (ZSUSXC)
+  ELSE
+    IF (KIND (ZSUSXC) == 4) THEN
+      alloc4 (ZSUSXC)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  IF (KIND (ZFACQSC) == 8) THEN
+    alloc8 (ZFACQSC)
+  ELSE
+    IF (KIND (ZFACQSC) == 4) THEN
+      alloc4 (ZFACQSC)
+    ELSE
+      STOP 1
+    END IF
+  END IF
+  JLON = KIDIA
+  
+  !-----------------------------------------------------------------------
+  !-----------------------------------------------------------------------
+  
+  !     ------------------------------------------------------------------
+  !     INITIALISATION.
+  
+  IF (JPRB == JPRD) THEN
+    ZEPSNEB = 1.E-10_JPRB
+  ELSE
+    ZEPSNEB = 1.E-06_JPRB
+  END IF
+  ZEPSQC = 1.E-10_JPRB
+  ZEPSDS = 1._JPRB
+  ZTAUX = 3600._JPRB
+  LLSC = YDML_PHY_MF%YRPHY0%QSSC /= 0.0_JPRB
+  LLSTRAT = YDML_PHY_MF%YRPHY0%RPHI0 /= 0.0_JPRB
+  ZQSAT(JLON, :) = PQSAT(JLON, :)
+  ZPHIRSQ = SQRT(MAX(ZEPSNEB, YDML_PHY_MF%YRPHY0%RPHIR))
+  
+  ZEPS1 = 1.E-6_JPRB
+  ZEPS2 = 1.E-10_JPRB
+  ZARGLI = 125._JPRB**(1.0_JPRB / YDML_PHY_MF%YRPHY0%QXRTGH)
+  
+  IF (YDML_PHY_MF%YRPHY0%QSNEBC >= 0.0_JPRB) THEN
+    DO JLEV=KTDIA,KLEV
+      ZSNEBC(JLON, JLEV) = YDML_PHY_MF%YRPHY0%QSNEBC
+      ZSUSXC(JLON, JLEV) = YDML_PHY_MF%YRPHY0%QSUSXC
+      ZFACQSC(JLON, JLEV) = YDML_PHY_MF%YRPHY2%TSPHY / YDML_PHY_MF%YRPHY0%QSUSXC
+    END DO
+  ELSE
+    ZARG1 = 2.0_JPRB*YDML_PHY_MF%YRPHY0%RQICVMAX*(1.0_JPRB - 0.999_JPRB) / (YDML_PHY_MF%YRPHY0%RQICVMAX -  &
+    & YDML_PHY_MF%YRPHY0%RQICVMIN) - 1.0_JPRB
+    ZARG2 = 2.0_JPRB*(YDML_PHY_MF%YRPHY0%RQICVMAX - 1.5_JPRB*YDML_PHY_MF%YRPHY0%RQICVMIN) / (YDML_PHY_MF%YRPHY0%RQICVMAX -  &
+    & YDML_PHY_MF%YRPHY0%RQICVMIN) - 1.0_JPRB
+    ZARG1 = 0.5_JPRB*LOG(ABS((1.0_JPRB + ZARG1) / (1.0_JPRB - ZARG1)))
+    ZARG2 = 0.5_JPRB*LOG(ABS((1.0_JPRB + ZARG2) / (1.0_JPRB - ZARG2)))
+    ZALPH = (ZARG1 - ZARG2) / (YDML_PHY_MF%YRPHY0%RQICRT2 - YDML_PHY_MF%YRPHY0%RQICRT1)
+    ZBETA = ZARG1 - YDML_PHY_MF%YRPHY0%RQICRT2*ZALPH
+    DO JLEV=KTDIA,KLEV
+      ZICE = FONICE(PT(JLON, JLEV), YDML_PHY_MF%YRPHY0%RDTFAC)
+      ZQICR = YDML_PHY_MF%YRPHY0%RQICVMAX - (YDML_PHY_MF%YRPHY0%RQICVMAX - YDML_PHY_MF%YRPHY0%RQICVMIN)*0.5_JPRB*(1.0_JPRB +  &
+      & TANH(ZALPH*(PT(JLON, JLEV) - YDCST%RTT) + ZBETA))
+      ZQCR = YDML_PHY_MF%YRPHY0%RQLCV*(1.0_JPRB - ZICE) + ZQICR*ZICE
+      ZSNEBC(JLON, JLEV) = 1.0_JPRB / ZQCR
+      ZSUSXC(JLON, JLEV) = YDML_PHY_MF%YRPHY0%SXNBCO*ZQCR
+      ZFACQSC(JLON, JLEV) = ZTAUX / PQSAT(JLON, JLEV)
+    END DO
+  END IF
+  
+  IF (.not.(YDML_PHY_MF%YRPHY%LCONDWT .and. YDML_PHY_MF%YRPHY%LPROCLD) .and. .not.YDML_PHY_MF%YRPHY%LNEB_FP) THEN
+    
+    ! ENERGIE STATIQUE SECHE.
+    
+    DO JLEV=KTDIA,KLEV
+      ZS(JLON, JLEV) = PCP(JLON, JLEV)*PT(JLON, JLEV) + PAPHIF(JLON, JLEV)
+      ZQSSTPP(JLON, JLEV) = 0.0_JPRB
+      ZSDELP(JLON, JLEV) = 0.0_JPRB
+    END DO
+    
+    ! SATURATION MODIFIEE EN CAS D'INVERSION THERMIQUE
+    ! MODIFIED SATURATION IN CASE OF TEMPERATURE INVERSION
+    
+    IF (LLSTRAT) THEN
+      
+      DO JLEV=KTDIA + 1,KLEV
+        ZTGRAD(JLON, JLEV) = MAX(ZEPSNEB, (PT(JLON, JLEV) - PT(JLON, JLEV - 1))*YDML_PHY_MF%YRPHY0%RPHI0 / (PAPHIF(JLON, JLEV) -  &
+        & PAPHIF(JLON, JLEV - 1)))
+        ZINQ(JLON, JLEV) = 1.0_JPRB / ZTGRAD(JLON, JLEV)
+      END DO
+      DO JLEV=KLEV,KTDIA + 2,-1
+        ZSUM = 0.0_JPRB
+        ZPHIREL1 = 0.0_JPRB
+        !cdir unroll=8
+        DO ILEV=JLEV,KTDIA + 1,-1
+          ZPHIREL2 = MIN(SQRT(PAPHIF(JLON, ILEV - 1) - PAPHIF(JLON, JLEV)), ZPHIRSQ)
+          ZSUM = ZSUM + ZINQ(JLON, ILEV)*(ZPHIREL2 - ZPHIREL1)
+          ZPHIREL1 = ZPHIREL2
+        END DO
+        ZTGRAD(JLON, JLEV) = ZPHIRSQ / ZSUM
+      END DO
+      
+      DO JLEV=KTDIA + 1,KLEV
+        ZTFROID = PT(JLON, JLEV) - ZTGRAD(JLON, JLEV)
+        IF (YDML_PHY_MF%YRPHY%LNEIGE) THEN
+          ZDELTA = MAX(0.0_JPRB, SIGN(1.0_JPRB, YDCST%RTT - ZTFROID))
+        ELSE
+          ZDELTA = 0.0_JPRB
+        END IF
+        
+        ZEW = FOEW(ZTFROID, ZDELTA)
+        ZESP = ZEW / PAPRSF(JLON, JLEV)
+        ZQSAT(JLON, JLEV) = FOQS(ZESP)
+      END DO
+    END IF
+    !     ------------------------------------------------------------------
+    !     DIAGNOSTICS D'EAU CONDENSEE ET DE NEBULOSITE.
+    !     CLOUD CONTENTS AND CLOUDINESS DIAGNOSTIC.
+    
+    ILEVTES = KLEV
+    ILEVX = KLEV
+    DO JLEV=KLEV,KTDIA,-1
+      
+      ! INTEGRALE VERTICALE DE L'ECART ENTRE L'HUMIDITE
+      ! DU NIVEAU COURANT JLEV2 ET LA VALEUR SATURANTE AU NIVEAU HAUT JLEV.
+      ! ZDELTAP EST LE PRODUIT DE L'EPAISSEUR-PRESSION DE LA COUCHE COURANTE
+      ! ET D'UN REEL VALANT 1 SI L'ENERGIE STATIQUE SECHE DE LA COUCHE
+      ! COURANTE EST SUPERIEURE A CELLE DU HAUT, ET TENDANT VERS ZERO
+      ! LORSQUE SON ECART A CELLE DU HAUT DESCEND EN DECA DU SEUIL -QSSC.
+      
+      IF (LLSC) THEN
+        ILEV = ILEVX
+      ELSE
+        ILEV = JLEV
+      END IF
+      ILEVX = JLEV
+      
+      IF (LLSC) THEN
+        ILEVREF = ILEVTES
+      ELSE
+        ILEVREF = JLEV
+      END IF
+      ILEVTES = JLEV
+      
+      DO JLEV2=JLEV,ILEV
+        ZDSN = (ZS(JLON, JLEV) - ZS(JLON, JLEV2)) / MAX(ZEPSDS, YDML_PHY_MF%YRPHY0%QSSC)
+        ZD3 = 1.0_JPRB + ZDSN*ZDSN*(2.0_JPRB*ZDSN - 3._JPRB)
+        ZMASK1 = MAX(0.0_JPRB, SIGN(1.0_JPRB, 0.0_JPRB - ZDSN))
+        ZMASK2 = MAX(0.0_JPRB, SIGN(1.0_JPRB, 1.0_JPRB - ZDSN))
+        ZFRAC = ZMASK1 + (1.0_JPRB - ZMASK1)*ZMASK2*ZD3
+        ZFRAC = ZFRAC*REAL(MAX(0, MIN(1, ILEVREF - JLEV2 + 1)), kind=JPRB)
+        ZDELTAP = ZFRAC*PDELP(JLON, JLEV2)
+        ILEVSIG = JLEV2*NINT(MAX(0.0_JPRB, -SIGN(1.0_JPRB, 0.0_JPRB - ZFRAC)))
+        ILEVX = MAX(ILEVX, ILEVSIG)
+        ILEVTES = MAX(ILEVTES, ILEVSIG)
+        IF (YDML_PHY_MF%YRPHY%L3MT .or. YDML_PHY_MF%YRPHY%LSTRAPRO) THEN
+          ZQTOT = PQ(JLON, JLEV2) + PQL(JLON, JLEV2) + PQI(JLON, JLEV2)
+        ELSE
+          ZQTOT = PQ(JLON, JLEV2)
+        END IF
+        ZQSSTPP(JLON, JLEV) = ZQSSTPP(JLON, JLEV) + MAX(0.0_JPRB, ZQTOT - (YDML_PHY_MF%YRPHY0%RHUC(JLEV) +  &
+        & YDML_PHY_MF%YRPHY0%HUCREDRA) / (1.0_JPRB + YDML_PHY_MF%YRPHY0%HUCREDRA)*ZQSAT(JLON, JLEV))*ZDELTAP
+        ZSDELP(JLON, JLEV) = ZSDELP(JLON, JLEV) + ZDELTAP
+      END DO
+      
+      
+      !             PARTIE STRATIFORME.
+      !             STRATIFORM PART.
+      
+      ZSSUSS = YDML_PHY_MF%YRPHY0%QSSUSS / SQRT(1.0_JPRB + (YDML_PHY_MF%YRPHY0%RQSMOD(JLEV)*PQSAT(JLON, JLEV))**2)
+      ZQSS(JLON, JLEV) = ZSSUSS*ZQSSTPP(JLON, JLEV) / ZSDELP(JLON, JLEV)
+      ZQSS(JLON, JLEV) = YDML_PHY_MF%YRPHY0%QSUSXS*(1.0_JPRB - EXP(-ZQSS(JLON, JLEV) / YDML_PHY_MF%YRPHY0%QSUSXS))
+      
+    END DO
+    
+  ELSE
+    
+    DO JLEV=KTDIA,KLEV
+      ZQSS(JLON, JLEV) = PQLIS(JLON, JLEV) + PQLI_CVPP(JLON, JLEV)
+    END DO
+    
+  END IF
+  
+  IF (YDML_PHY_MF%YRPHY%L3MT .and. YDML_PHY_MF%YRPHY0%QXRAL <= 0._JPRB) THEN
+    ! DIRECT USE OF MICROPHYS CLD AND COND
+    DO JLEV=KTDIA,KLEV
+      !DEC$ IVDEP
+      PNEBC(JLON, JLEV) = MAX(ZEPSNEB, MIN(1.0_JPRB - ZEPSNEB, PUNEBH(JLON, JLEV)))
+      ZNEBS = MAX(PNEBS(JLON, JLEV), PNEB_CVPP(JLON, JLEV))
+      PNEB(JLON, JLEV) = ZNEBS + (1.0_JPRB - ZNEBS)*PNEBC(JLON, JLEV)
+      PNEB(JLON, JLEV) = MAX(ZEPSNEB, MIN(1.0_JPRB - ZEPSNEB, PNEB(JLON, JLEV)))
+      ZPLS = FONICE(PT(JLON, JLEV), YDML_PHY_MF%YRPHY0%RDTFAC)
+      PQLI(JLON, JLEV) = ZQSS(JLON, JLEV)*(1.0_JPRB - ZPLS)
+      PQICE(JLON, JLEV) = ZQSS(JLON, JLEV)*ZPLS
+    END DO
+  ELSE
+    DO JLEV=KTDIA,KLEV
+      
+      !             PARTIE CONVECTIVE.
+      !             CONVECTIVE PART.
+      
+      IF (YDML_PHY_MF%YRPHY%L3MT) THEN
+        
+        !   Calculate convective condensate using the convective cloudiness
+        !   of last time step
+        
+        IF (YDML_PHY_MF%YRPHY%LQXRTGH) THEN
+          ZRH = MIN(ZARGLI, MAX(ZEPS1, PQ(JLON, JLEV) / PQSAT(JLON, JLEV)))
+          ZRHEXP = EXP(-2.0_JPRB*ZRH**YDML_PHY_MF%YRPHY0%QXRTGH)
+          ZRH = ((1.0_JPRB - ZRHEXP) / (1.0_JPRB + ZRHEXP))**(1.0_JPRB / YDML_PHY_MF%YRPHY0%QXRTGH)
+          ZBIN = 0.0_JPRB
+        ELSE
+          ZRH = MIN(YDML_PHY_MF%YRPHY0%QXRHX, PQ(JLON, JLEV) / PQSAT(JLON, JLEV))
+          ZBIN = MAX(0.0_JPRB, SIGN(1.0_JPRB, ZRH - 1.0_JPRB))
+        END IF
+        
+        ZRHLIM = MAX(ZEPS1, MIN(1.0_JPRB - ZEPS1, ZRH))
+        
+        ! Caution: Expressions below for ZRHLIMPR and ZEXPR are valid for
+        ! QXRDEL=0.5 and QXRR=0.25 only, which is more efficient
+        ! than the full formula which reads:
+        !!! ZQSC(JLON,JLEV)=-((1.0_JPRB-ZRHLIM)*PQSAT(JLON,JLEV))**QXRDEL/QXRAL*&
+        !!!  &LOG(MAX(ZEPS2,1.0_JPRB-PUNEBH(JLON,JLEV)/(ZRHLIM**QXRR) ))
+        
+        ZRHLIMPR = SQRT(SQRT(ZRHLIM))
+        ZEXPR = SQRT((1.0_JPRB - ZRHLIM)*PQSAT(JLON, JLEV))*(1.0_JPRB / YDML_PHY_MF%YRPHY0%QXRAL)
+        ZQSC(JLON, JLEV) = -ZEXPR*LOG(MAX(ZEPS2, 1.0_JPRB - PUNEBH(JLON, JLEV) / ZRHLIMPR))
+        
+        ZQS(JLON, JLEV) = ZQSS(JLON, JLEV) + ZQSC(JLON, JLEV)
+        
+        PNEB(JLON, JLEV) = ZRHLIMPR*(1.0_JPRB - EXP(-(ZQS(JLON, JLEV) / ZEXPR)))
+        PNEB(JLON, JLEV) = MAX(ZEPS1, MIN(1.0_JPRB - ZEPS1, ZBIN + (1.0_JPRB - ZBIN)*PNEB(JLON, JLEV)))
+        
+        PNEBC(JLON, JLEV) = ZQSC(JLON, JLEV) / MAX(ZEPSQC, ZQS(JLON, JLEV))*PNEB(JLON, JLEV)
+        
+      ELSE
+        IF (YDML_PHY_MF%YRPHY%LNCVPGY) THEN
+          ZQSC(JLON, JLEV) = PQLI_CVP(JLON, JLEV)
+        ELSE
+          ZQSC(JLON, JLEV) =  &
+          & MAX(0.0_JPRB, PFPLC(JLON, JLEV) - PFPLC(JLON, JLEV - 1))*PRDELP(JLON, JLEV)*YDCST%RG*YDML_PHY_MF%YRPHY0%QSSUSC
+          ZQSC(JLON, JLEV) = ZSUSXC(JLON, JLEV)*(1.0_JPRB - EXP(-ZQSC(JLON, JLEV)*ZFACQSC(JLON, JLEV)))
+        END IF
+        !             TOTAL.
+        
+        IF (YDML_PHY_MF%YRPHY%LCONDWT .and. YDML_PHY_MF%YRPHY%LPROCLD .and. YDML_PHY_MF%YRPHY%LRNUMX) THEN
+          ZQS(JLON, JLEV) = MAX(ZQSS(JLON, JLEV), ZQSC(JLON, JLEV))
+        ELSE
+          ZQS(JLON, JLEV) = ZQSS(JLON, JLEV) + ZQSC(JLON, JLEV)
+        END IF
+        
+      END IF
+      
+      
+      !             CALCULS DEPENDANT DE L'OPTION NEIGE.
+      !             SNOW OPTION DEPENDENT CALCULATIONS.
+      
+      IF (YDML_PHY_MF%YRPHY%LNEIGE) THEN
+        ZPLS = FONICE(PT(JLON, JLEV), YDML_PHY_MF%YRPHY0%RDTFAC)
+        PQLI(JLON, JLEV) = ZQS(JLON, JLEV)*(1.0_JPRB - ZPLS)
+        PQICE(JLON, JLEV) = ZQS(JLON, JLEV)*ZPLS
+      ELSE
+        PQLI(JLON, JLEV) = ZQS(JLON, JLEV)
+        PQICE(JLON, JLEV) = 0.0_JPRB
+      END IF
+    END DO
+    
+    !            NEBULOSITE
+    !            CLOUDINESS
+    
+    IF (YDML_PHY_MF%YRPHY%LNEBNXR .and. .not.YDML_PHY_MF%YRPHY%LGPCMT) THEN
+      IF (.not.YDML_PHY_MF%YRPHY%L3MT) THEN
+        CALL ACNEBXRS_OPENACC(YDML_PHY_MF%YRPHY, YDML_PHY_MF%YRPHY0, KIDIA, KFDIA, KLON, KTDIA, KLEV, PQ, ZQS, PQSAT, PNEB,  &
+        & YDSTACK=YLSTACK)
+        DO JLEV=KTDIA,KLEV
+          PNEBC(JLON, JLEV) = ZQSC(JLON, JLEV) / MAX(ZEPSQC, ZQS(JLON, JLEV))*PNEB(JLON, JLEV)
+        END DO
+      END IF
+    ELSE IF (YDML_PHY_MF%YRPHY%LGPCMT .and. YDML_PHY_MF%YRPHY%LRNUMX) THEN
+      DO JLEV=KTDIA,KLEV
+        ! Cloudiness 1: PCMT cloudiness: maximum of resolved and convective ones.
+        PNEB(JLON, JLEV) = MAX(PNEBS(JLON, JLEV), PNEBC(JLON, JLEV))
+        ! Cloudiness 2: KFB or EDKF cloudiness.
+        ZNEBS = MAX(PNEBS(JLON, JLEV), PNEB_CVPP(JLON, JLEV))
+        ZNEBC_NON_PCMT = MAX(ZEPSNEB, MIN(1.0_JPRB - ZEPSNEB, ZSNEBC(JLON, JLEV)*ZQSC(JLON, JLEV)))
+        ZNEB_NON_PCMT = MAX(ZNEBS, ZNEBC_NON_PCMT)
+        ! Choose cloudinesses 1 or 2, depending on PAIPCMT activity index.
+        PNEB(JLON, JLEV) = PAIPCMT(JLON)*PNEB(JLON, JLEV) + (1._JPRB - PAIPCMT(JLON))*ZNEB_NON_PCMT
+        PNEBC(JLON, JLEV) = PAIPCMT(JLON)*PNEBC(JLON, JLEV) + (1._JPRB - PAIPCMT(JLON))*ZNEBC_NON_PCMT
+      END DO
+    ELSE IF (YDML_PHY_MF%YRPHY%LGPCMT .and. .not.YDML_PHY_MF%YRPHY%LRNUMX) THEN
+      DO JLEV=KTDIA,KLEV
+        ! Cloudiness 1: PCMT cloudiness: maximum of resolved and convective ones.
+        ZNEBS = MAX(PNEBS(JLON, JLEV), PNEB_CVPP(JLON, JLEV))
+        PNEB(JLON, JLEV) = ZNEBS + (1.0_JPRB - ZNEBS)*PNEBC(JLON, JLEV)
+        ! Cloudiness 2: KFB or EDKF cloudiness.
+        ZNEBS = MAX(PNEBS(JLON, JLEV), PNEB_CVPP(JLON, JLEV))
+        ZNEBC_NON_PCMT = MAX(ZEPSNEB, MIN(1.0_JPRB - ZEPSNEB, ZSNEBC(JLON, JLEV)*ZQSC(JLON, JLEV)))
+        ZNEB_NON_PCMT = ZNEBS + (1.0_JPRB - ZNEBS)*PNEBC(JLON, JLEV)
+        ! Choose cloudinesses 1 or 2, depending on PAIPCMT activity index.
+        PNEB(JLON, JLEV) = PAIPCMT(JLON)*PNEB(JLON, JLEV) + (1._JPRB - PAIPCMT(JLON))*ZNEB_NON_PCMT
+        PNEBC(JLON, JLEV) = PAIPCMT(JLON)*PNEBC(JLON, JLEV) + (1._JPRB - PAIPCMT(JLON))*ZNEBC_NON_PCMT
+      END DO
+    ELSE IF (YDML_PHY_MF%YRPHY%LCONDWT .and. YDML_PHY_MF%YRPHY%LPROCLD .and. .not.YDML_PHY_MF%YRPHY%LNCVPGY .and.  &
+    & YDML_PHY_MF%YRPHY%LRNUMX) THEN
+      DO JLEV=KTDIA,KLEV
+        ZNEBS = MAX(PNEBS(JLON, JLEV), PNEB_CVPP(JLON, JLEV))
+        PNEBC(JLON, JLEV) = MAX(ZEPSNEB, MIN(1.0_JPRB - ZEPSNEB, ZSNEBC(JLON, JLEV)*ZQSC(JLON, JLEV)))
+        PNEB(JLON, JLEV) = MAX(ZNEBS, PNEBC(JLON, JLEV))
+      END DO
+    ELSE IF (YDML_PHY_MF%YRPHY%LCONDWT .and. YDML_PHY_MF%YRPHY%LPROCLD .and. .not.YDML_PHY_MF%YRPHY%LNCVPGY .and.  &
+    & .not.YDML_PHY_MF%YRPHY%LRNUMX) THEN
+      DO JLEV=KTDIA,KLEV
+        ZNEBS = MAX(PNEBS(JLON, JLEV), PNEB_CVPP(JLON, JLEV))
+        PNEBC(JLON, JLEV) = MAX(ZEPSNEB, MIN(1.0_JPRB - ZEPSNEB, ZSNEBC(JLON, JLEV)*ZQSC(JLON, JLEV)))
+        PNEB(JLON, JLEV) = ZNEBS + (1.0_JPRB - ZNEBS)*PNEBC(JLON, JLEV)
+      END DO
+    ELSE IF ( &
+    & YDML_PHY_MF%YRPHY%LCONDWT .and. YDML_PHY_MF%YRPHY%LPROCLD .and. YDML_PHY_MF%YRPHY%LNCVPGY .and. YDML_PHY_MF%YRPHY%LRNUMX &
+    & ) THEN
+      DO JLEV=KTDIA,KLEV
+        ZNEBS = MAX(PNEBS(JLON, JLEV), PNEB_CVPP(JLON, JLEV))
+        PNEB(JLON, JLEV) = MAX(ZNEBS, PNEBC(JLON, JLEV))
+      END DO
+    ELSE IF (YDML_PHY_MF%YRPHY%LCONDWT .and. YDML_PHY_MF%YRPHY%LPROCLD .and. YDML_PHY_MF%YRPHY%LNCVPGY .and.  &
+    & .not.YDML_PHY_MF%YRPHY%LRNUMX) THEN
+      DO JLEV=KTDIA,KLEV
+        ZNEBS = MAX(PNEBS(JLON, JLEV), PNEB_CVPP(JLON, JLEV))
+        PNEB(JLON, JLEV) = ZNEBS + (1.0_JPRB - ZNEBS)*PNEBC(JLON, JLEV)
+      END DO
+    ELSE
+      DO JLEV=KTDIA,KLEV
+        !DEC$ IVDEP
+        ZNEBS = MAX(ZEPSNEB, MIN(1.0_JPRB - ZEPSNEB, YDML_PHY_MF%YRPHY0%QSNEBS*SQRT(ZQSS(JLON, JLEV) / PQSAT(JLON, JLEV))))
+        PNEBC(JLON, JLEV) = MAX(ZEPSNEB, MIN(1.0_JPRB - ZEPSNEB, ZSNEBC(JLON, JLEV)*ZQSC(JLON, JLEV)))
+        PNEB(JLON, JLEV) = ZNEBS + (1.0_JPRB - ZNEBS)*PNEBC(JLON, JLEV)
+      END DO
+    END IF
+  END IF
+  !-----------------------------------------------------------------------
+END SUBROUTINE ACNEBN_OPENACC

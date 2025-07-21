@@ -1,0 +1,15 @@
+loki : temp repo with _openacc.F90 and . file to test
+src : files
+
+src : regular files
+openacc and loki : _openacc.F90 + interface
+
+openacc : ref
+loki : test 
+
+
+test to run : 1) diff_openacc.sh, diff_cpg_dyn_slg.sh : for kernels and interface
+              2) diff_tmp.sh : for kernels with call to inline in CONTAINS section
+             
+
+test.sh generates the code (openacc.sh and cpg_dyn_slg.sh) and run the tests (diff_openacc.sh, diff_cpg_dyn_slg.sh and diff_tmp.sh)

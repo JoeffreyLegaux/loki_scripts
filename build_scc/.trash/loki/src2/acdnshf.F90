@@ -1,0 +1,194 @@
+SUBROUTINE ACDNSHF_OPENACC (YDCST, YDPHY, YDPHY1, KIDIA, KFDIA, KLON, KTDIA, KLEV, PEMIS, PLSM, PNEIJ, PQ, PQS, PTS, PCHROV,  &
+& PDQSTS, PDERNSHF, YDSTACK)
+  !---------------------------------------------------------------------
+  ! - INPUT .
+  ! - OUTPUT .
+  
+  !**** ACDNSHF ** -
+  
+  !     Purpose.
+  !     --------
+  !           COMPUTATION OF THE DERIVATIVE OF NON SOLAR SURFACE FLUXES.
+  
+  !**   Interface.
+  !     ----------
+  !        *CALL* *ACDNSHF*
+  
+  !        Explicit arguments :
+  !        --------------------
+  !-----------------------------------------------------------------------
+  
+  ! -   ARGUMENTS D'ENTREE.
+  ! -   INPUT ARGUMENTS.
+  !     -------------------
+  
+  ! - NOM DES PARAMETRES DE DIMENSIONNEMENT DE LA PHYSIQUE.
+  ! - DIMENSIONS.
+  
+  ! KIDIA, KFDIA : BORNES BOUCLES HORIZONTALES   (IST,IEND DANS CPG).
+  ! KIDIA, KFDIA : START/END OF HORIZONTAL LOOP  (IST,IEND IN *CPG*).
+  ! KLON : DIMENSION HORIZONTALE                 (NPROMA DANS CPG).
+  ! KLON : HORIZONTAL DIMENSION                  (NPROMA IN *CPG*).
+  ! KLON: IDEM BUT FOR ARRAYS USED SOLELY BY DMN PHYSICS
+  ! KTDIA : DEBUT BOUCLE VERTICALE DANS LA PHYSIQUE.
+  ! KTDIA : START OF THE VERTICAL LOOP IN THE PHYSICS (IF SOME LEVELS ARE
+  !                     SKIPPED AT THE TOP OF THE MODEL).
+  ! KLEV : FIN BOUCLE VERTICE ET DIMENSION VERTICALE (NFLEVG DANS CPG).
+  ! KLEV : END OF VERTICAL LOOP AND VERTICAL DIMENSION(NFLEVG IN *CPG*).
+  ! KGL1, KGL2 : BORNES BANDES LATITUDES CONCATENEES DANS BOUCLE (1,KLON)
+  ! KGL1, KGL2 : START/END CONCATENATED LATITUDES IN VECTOR OF KLON LENGTH
+  ! - NOM DES VARIABLES DE LA PHYSIQUE (PAR ORDRE ALPHABETIQUE DANS CHAQUE
+  !   CATEGORIE).
+  
+  ! - 2D (0:KLEV) .
+  ! PQ         : HUMIDITE SPECIFIQUE DE LA VAPEUR D'EAU.
+  ! PQ         : SPECIFIC HUMIDITY OF WATER VAPOUR.
+  ! - 1D (PROGNOSTIQUE) .
+  ! - 1D (PROGNOSTIC QUANTITIES) .
+  ! PLSM       : INDICE TERRE/MER.
+  ! PLSM       : LAND/SEA MASK.
+  ! PTS        : TEMPERATURE DE SURFACE.
+  ! PTS        : SURFACE LAYER TEMPERATURE.
+  ! PEMIS      : EMISSIVITE DE SURFACE COURANTE.
+  ! PEMIS      : MODEL SURFACE LONGWAVE EMISSIVITY.
+  ! PNEIJ      : PROPORTION DE SOL ENNEIGE.
+  ! PNEIJ      : FRACTION OF SOIL COVERED BY SNOW.
+  ! PQS        : HUMIDITE SPECIFIQUE DE SURFACE.
+  ! PQS        : SPECIFIC HUMIDITY AT SURFACE LEVEL.
+  ! PCHROV     : PCH RENORME EN DENSITE FOIS VITESSE.
+  ! PDQSTS     : DERIVEE DE PQSATS PAR RAPPORT A LA TEMPERATURE.
+  !-----------------------------------------------------------------------
+  
+  ! -   ARGUMENTS DE SORTIE.
+  ! -   OUTPUT ARGUMENTS.
+  !     --------------------
+  ! PDERNSHF    : DERIVEE DES FLUX NON SOLAIRES PAR RAPPORT A LA TEMPERATURE
+  
+  !     Method.
+  !     -------
+  !        See documentation
+  
+  !     Externals.
+  !     ----------
+  
+  !     Reference.
+  !     ----------
+  !        Coupled run CA2 of CERFACS (Laurent Terray)
+  
+  !     Author.
+  !     -------
+  !        JF Royer
+  
+  !     Modifications.
+  !     --------------
+  !        Original : 99-07-16
+  !        Modified : 01-12-07 P. Marquet - Modifications for Climat-V4
+  !        M.Hamrud      01-Oct-2003 CY28 Cleaning
+  !        K. Yessad (Jul 2009): remove CDLOCK + some cleanings
+  !     R. El Khatib 22-Jun-2022 A contribution to simplify phasing after the refactoring of YOMCLI/YOMCST/YOETHF.
+  !     ------------------------------------------------------------------
+  
+!$acc routine( ACDNSHF_OPENACC ) seq
+  
+  USE PARKIND1, ONLY: JPIM, JPRB
+  USE YOMHOOK, ONLY: LHOOK, DR_HOOK, JPHOOK
+  
+  USE YOMPHY, ONLY: TPHY
+  USE YOMCST, ONLY: TCST
+  USE YOMPHY1, ONLY: TPHY1
+  
+  !     ------------------------------------------------------------------
+  
+  USE STACK_MOD
+#include "stack.h"
+  
+  IMPLICIT NONE
+  
+  TYPE(TCST), INTENT(IN) :: YDCST
+  TYPE(TPHY), INTENT(IN) :: YDPHY
+  TYPE(TPHY1), INTENT(IN) :: YDPHY1
+  INTEGER(KIND=JPIM), INTENT(IN) :: KLON
+  INTEGER(KIND=JPIM), INTENT(IN) :: KLEV
+  INTEGER(KIND=JPIM), INTENT(IN) :: KIDIA
+  INTEGER(KIND=JPIM), INTENT(IN) :: KFDIA
+  INTEGER(KIND=JPIM), INTENT(IN) :: KTDIA
+  REAL(KIND=JPRB), INTENT(IN) :: PEMIS
+  REAL(KIND=JPRB), INTENT(IN) :: PLSM
+  REAL(KIND=JPRB), INTENT(IN) :: PNEIJ
+  REAL(KIND=JPRB), INTENT(IN) :: PQ(KLON, KLEV)
+  REAL(KIND=JPRB), INTENT(IN) :: PQS
+  REAL(KIND=JPRB), INTENT(IN) :: PTS
+  REAL(KIND=JPRB), INTENT(IN) :: PCHROV
+  REAL(KIND=JPRB), INTENT(IN) :: PDQSTS
+  REAL(KIND=JPRB), INTENT(OUT) :: PDERNSHF
+  
+  !     ------------------------------------------------------------------
+  
+  REAL(KIND=JPRB) :: ZZDLS
+  REAL(KIND=JPRB) :: ZZDLLW
+  REAL(KIND=JPRB) :: ZZDLLS
+  REAL(KIND=JPRB) :: ZZDRCN
+  REAL(KIND=JPRB) :: ZZPN
+  
+  INTEGER(KIND=JPIM) :: JLEV
+  INTEGER(KIND=JPIM) :: JLON
+  
+  REAL(KIND=JPRB) :: ZCPVMD
+  REAL(KIND=JPRB) :: ZCPVMS
+  REAL(KIND=JPRB) :: ZCPVMW
+  REAL(KIND=JPHOOK) :: ZHOOK_HANDLE
+  
+  !     ------------------------------------------------------------------
+  
+#include "fcttrm.func.h"
+  TYPE(STACK), INTENT(IN) :: YDSTACK
+  TYPE(STACK) :: YLSTACK
+  YLSTACK = YDSTACK
+  JLON = KIDIA
+  
+  !     ------------------------------------------------------------------
+  !     ------------------------------------------------------------------
+  
+  !* ca2 PB 22/11/96 Calcul de dQ/dT
+  
+  !  Constantes auxiliaires.
+  
+  ZCPVMD = YDCST%RCPV - YDCST%RCPD
+  ZCPVMW = YDCST%RCPV - YDCST%RCW
+  ZCPVMS = YDCST%RCPV - YDCST%RCS
+  
+  !  Calcul de la proportion de la surface evaporante en phase glace
+  
+  DO JLEV=KTDIA,KLEV
+    IF (YDPHY%LNEIGE) THEN
+      ZZPN = PLSM*PNEIJ + (1.0_JPRB - PLSM)*MAX(0.0_JPRB, SIGN(1.0_JPRB, YDPHY1%TMERGL - PTS))
+    ELSE
+      ZZPN = 0.0_JPRB
+    END IF
+    
+    !  Boucle de calcul des derivees des composantes du flux non solaire
+    !  Remarques :
+    
+    !    - Coefficient d'echange ce = ch
+    !    - On considere dch/dT et drau/dT = 0
+    
+    
+    ! Derivee du flux de chaleur sensible
+    ZZDLS = PCHROV*(YDCST%RCPD + ZCPVMD*PQS + ZCPVMD*PDQSTS*PTS)
+    
+    ! Derivee du flux de chaleur latente sur eau
+    ZZDLLW = (1.0_JPRB - ZZPN)*PCHROV*((PQS - PQ(JLON, KLEV))*ZCPVMW + FOLH(PTS, 0.0_JPRB)*PDQSTS)
+    
+    ! Derivee du flux de chaleur latente sur glace
+    ZZDLLS = PCHROV*ZZPN*((PQS - PQ(JLON, KLEV))*ZCPVMS + FOLH(PTS, 1.0_JPRB)*PDQSTS)
+    
+    ! Derivee du flux de rayonnement thermique
+    ZZDRCN = PEMIS*4._JPRB*YDCST%RSIGMA*PTS*PTS*PTS
+    
+    ! Derivee du flux non solaire total
+    PDERNSHF = -(ZZDLS + ZZDLLW + ZZDLLS + ZZDRCN)
+    
+  END DO
+  
+  !     ------------------------------------------------------------------
+END SUBROUTINE ACDNSHF_OPENACC

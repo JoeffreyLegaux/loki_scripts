@@ -1,0 +1,20 @@
+# (C) Copyright 2023- ECMWF.
+# (C) Copyright 2023- Meteo-France.
+
+This git repo contains Météo France SingleColumnCoalesced (SCC) transformation based on loki software (https://github.com/ecmwf-ifs/loki).
+
+To run the test, go in build_scc/test and run test.sh, it will apply the transformation on some of the files in build_scc/test/src, and compare the files created with the files in the build_scc/openacc folder.
+To run the transformation, go in your pack where you want to apply the transformation, and run build_scc/bin/openacc.sh and build_scc/bin/cpg_dyn_slg.sh.
+
+
+
+list of folders and their content : 
+
+transformation : python code doing the transformation using loki
+.bk : ignore this folder...
+bin : bash scripts to run the transformation in the pack (+ scripts (get_... scripts) to build the build_scc/test/src folder)
+doc : empty folder
+
+
+
+
