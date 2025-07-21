@@ -319,30 +319,6 @@ class MakeSync(Transformation):
         cond = Conditional(condition=associate_call, body = (sync_call,), inline = True)
         return cond
         
-        # Do not create loop : the original loop exists in the caller (for sync regions)
-        # on has been conserved in the body of the rougine (for sync routines)
-        
-        #if not derived:
-        #    return cond
-        #else :
-        #    parent = var.parent
-        #    # If flagged as derived type with index, there must be a parent with index
-        #    while str(parent) == parent.name:
-        #        parent = parent.parent
-        #    #print("parent found : ", parent, type(parent), parent.dimensions[0])
-        #
-        #    loop = Loop(variable=parent.dimensions[0],  
-        #                bounds = LoopRange((IntLiteral(1), 
-        #                                    InlineCall(function=DeferredTypeSymbol('SIZE'), 
-        #                                                parameters = (parent.clone(dimensions=None),)) 
-        #                                   )), 
-        #                body = cond)
-        #
-        #    return loop
-        #else:
-        #    return sync_call
-
-
     def clearAssigns(self, node, upper_reads, upper_writes):
         #print("clear ", type(node), upper_reads, upper_writes)
         if isinstance(node, tuple):
@@ -703,7 +679,11 @@ class MakeSync(Transformation):
                 if self.callSuffix == 'SYNC_DEVICE' :  #or True:
                     copy_call = CallStatement(name = DeferredTypeSymbol(name='COPY_OBJECT',parent=array),
                                                 arguments=(), scope=routine )
-                    cond = Conditional(condition=LogicalNot(associate_call), body = (field_new_call,copy_call,))
+                    sync_call = CallStatement(name = DeferredTypeSymbol(name='SYNC_DEVICE_RDWR',parent=array),
+                                                                            arguments=(), scope=routine )
+
+                    attach = Pragma(keyword = "acc", content = f'enter data attach({array})')
+                    cond = Conditional(condition=LogicalNot(associate_call), body = (field_new_call,copy_call,attach))
 
                 else : 
                     cond = Conditional(condition=LogicalNot(associate_call), body = (field_new_call,))
@@ -714,7 +694,6 @@ class MakeSync(Transformation):
                     # If flagged as derived type with index, there must be a parent with index
                     while str(parent) == parent.name:
                         parent = parent.parent
-                    #print("parent found : ", parent, type(parent), parent.dimensions[0])
                 
                     loop = Loop(variable=parent.dimensions[0],  
                                 bounds = LoopRange((IntLiteral(1), 
